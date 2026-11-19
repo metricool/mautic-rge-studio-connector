@@ -373,12 +373,15 @@ final class EmailImporterTest extends MauticMysqlTestCase
         $this->em->flush();
         self::assertCount(0, $this->projects($this->email($first)));
 
-        $this->importer()->import($this->export(['subject' => 'Second subject']), microtime(true));
-        $third = $this->importer()->import($this->export(['subject' => 'Third subject']), microtime(true));
+        foreach (['Second subject', 'Third subject'] as $subject) {
+            $update = $this->importer()->import($this->export(['subject' => $subject]), microtime(true));
+            self::assertSame(ImportResult::UPDATED, $update->state);
+            self::assertSame($first->emailId, $update->emailId);
 
-        $projects = $this->projects($this->email($third));
-        self::assertCount(1, $projects);
-        self::assertSame('RGE Studio', $projects[0]->getName());
+            $projects = $this->projects($this->email($first));
+            self::assertCount(1, $projects);
+            self::assertSame('RGE Studio', $projects[0]->getName());
+        }
     }
 
     /**

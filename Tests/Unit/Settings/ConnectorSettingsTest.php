@@ -12,15 +12,43 @@ use PHPUnit\Framework\TestCase;
 final class ConnectorSettingsTest extends TestCase
 {
     /**
-     * Remove the secrets set in the environment by a test.
+     * Secret values the environment held before the test, put back afterwards.
+     *
+     * @var array<string, array{env: mixed, server: mixed, process: string|false}>
+     */
+    private array $saved = [];
+
+    /**
+     * Keep the secrets the environment already holds, then start every test without them.
+     *
+     * @return void
+     */
+    protected function setUp(): void
+    {
+        foreach ([ConnectorSettings::SECRET_ENV, ConnectorSettings::PREVIOUS_SECRET_ENV] as $name) {
+            $this->saved[$name] = ['env' => $_ENV[$name] ?? null, 'server' => $_SERVER[$name] ?? null, 'process' => getenv($name)];
+            $this->clear($name);
+        }
+    }
+
+    /**
+     * Remove the secrets a test set and put back the ones the environment held before.
      *
      * @return void
      */
     protected function tearDown(): void
     {
-        foreach ([ConnectorSettings::SECRET_ENV, ConnectorSettings::PREVIOUS_SECRET_ENV] as $name) {
-            unset($_ENV[$name], $_SERVER[$name]);
-            putenv($name);
+        foreach ($this->saved as $name => $saved) {
+            $this->clear($name);
+            if (null !== $saved['env']) {
+                $_ENV[$name] = $saved['env'];
+            }
+            if (null !== $saved['server']) {
+                $_SERVER[$name] = $saved['server'];
+            }
+            if (false !== $saved['process']) {
+                putenv($name.'='.$saved['process']);
+            }
         }
     }
 
@@ -267,5 +295,18 @@ final class ConnectorSettingsTest extends TestCase
     private function settings(array $parameters = []): ConnectorSettings
     {
         return SettingsStub::create($parameters);
+    }
+
+    /**
+     * Remove one secret from every place the settings read it from.
+     *
+     * @param string $name Environment variable name
+     *
+     * @return void
+     */
+    private function clear(string $name): void
+    {
+        unset($_ENV[$name], $_SERVER[$name]);
+        putenv($name);
     }
 }
