@@ -167,6 +167,23 @@ final class DesignExportParserTest extends TestCase
     }
 
     /**
+     * An id of up to 64 digits fits the design table, a longer one is rejected and never cut.
+     *
+     * @return void
+     */
+    public function testDesignIdLongerThanTheTableIsRejected(): void
+    {
+        $parser = new DesignExportParser();
+
+        self::assertSame(str_repeat('9', 64), $parser->designId('https://example.com/app/000'.str_repeat('9', 64)));
+        self::assertNull($parser->designId('https://example.com/app/'.str_repeat('9', 65)));
+
+        $this->expectException(InvalidExportException::class);
+        $this->expectExceptionMessage('The export has no design address.');
+        $parser->parse((string) json_encode(['html' => '<p>Hi</p>', 'edit_url' => 'https://example.com/app/'.str_repeat('9', 65)]));
+    }
+
+    /**
      * Export body whose structure field holds arrays nested inside the top object.
      *
      * @param int $levels Arrays nested inside the top object

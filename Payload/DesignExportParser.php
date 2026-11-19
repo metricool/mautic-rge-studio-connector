@@ -6,6 +6,8 @@ namespace MauticPlugin\RgeStudioConnectorBundle\Payload;
 
 class DesignExportParser
 {
+    private const ID_LIMIT = 64;
+
     /**
      * Read the JSON body the RGE Studio Custom Connector posts.
      *
@@ -56,7 +58,9 @@ class DesignExportParser
     }
 
     /**
-     * Design id taken from the edit address, the last number in its path.
+     * Design id taken from the edit address, the last number in its path, without leading zeros.
+     *
+     * An id longer than the 64 characters the design table stores counts as no id, so it is rejected and never cut.
      *
      * @param string $editUrl Edit address of the design
      *
@@ -70,6 +74,9 @@ class DesignExportParser
         }
 
         $trimmed = ltrim((string) end($numbers[0]), '0');
+        if (strlen($trimmed) > self::ID_LIMIT) {
+            return null;
+        }
 
         return '' === $trimmed ? '0' : $trimmed;
     }
