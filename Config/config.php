@@ -7,6 +7,16 @@ return [
     'description' => 'Turns RGE Studio (formerly Beefree) Custom Connector exports into Mautic emails.',
     'version'     => '1.0.0',
     'author'      => 'Metricool',
+    'routes'      => [
+        'public' => [
+            'rge_studio_connector_webhook' => [
+                'path'       => '/rge-studio/webhook',
+                'controller' => 'MauticPlugin\RgeStudioConnectorBundle\Controller\WebhookController::receiveAction',
+                'method'     => 'POST',
+                'defaults'   => ['_fos_rest_zone' => false],
+            ],
+        ],
+    ],
     'parameters' => [
         'rge_studio_connector_secret'                    => '',
         'rge_studio_connector_previous_secret'           => '',

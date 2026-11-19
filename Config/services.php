@@ -21,7 +21,10 @@ return function (ContainerConfigurator $configurator): void {
         'Payload/DesignExport.php',
         'Payload/InvalidExportException.php',
         'Import/Claim.php',
+        'Import/ConnectorConfigurationException.php',
         'Import/ImageImportResult.php',
+        'Import/ImportBusyException.php',
+        'Import/ImportResult.php',
         'vendor',
     ];
 
