@@ -35,7 +35,8 @@ class UnsubscribeLinkChecker
     /**
      * Turn a link address made of a scheme and a lone Mautic token into the token alone.
      *
-     * Mautic does the same at send time, but its link check rejects the address with the scheme.
+     * Mautic does the same at send time, but its link check rejects the address with the scheme. When the
+     * pattern cannot run on the HTML, the HTML is kept as it is.
      *
      * @param string $html Email HTML
      *
@@ -43,7 +44,7 @@ class UnsubscribeLinkChecker
      */
     public function normalise(string $html): string
     {
-        return preg_replace('/(\shref\s*=\s*["\']?)\s*(?:https?:)?\/\/(\{[a-z_]+\})(?=["\'\s>])/i', '$1$2', $html) ?? '';
+        return preg_replace('/(\shref\s*=\s*["\']?)\s*(?:https?:)?\/\/(\{[a-z_]+\})(?=["\'\s>])/i', '$1$2', $html) ?? $html;
     }
 
     /**

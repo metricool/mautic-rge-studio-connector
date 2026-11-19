@@ -194,6 +194,29 @@ final class UnsubscribeLinkCheckerTest extends TestCase
     }
 
     /**
+     * When the pattern cannot run, as when PCRE hits its backtracking limit, the HTML is kept as it is.
+     *
+     * @return void
+     */
+    public function testNormaliseKeepsTheHtmlWhenThePatternFails(): void
+    {
+        $html      = '<a href="https://{unsubscribe_url}">x</a>'.str_repeat(' href=', 2000);
+        $jit       = ini_get('pcre.jit');
+        $backtrack = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+
+        try {
+            $result = $this->checker()->normalise($html);
+        } finally {
+            ini_set('pcre.jit', false === $jit ? '1' : $jit);
+            ini_set('pcre.backtrack_limit', false === $backtrack ? '1000000' : $backtrack);
+        }
+
+        self::assertSame($html, $result);
+    }
+
+    /**
      * Checker over the given settings.
      *
      * @param bool                 $headerRule Whether Mautic adds List-Unsubscribe only when the HTML asks for it
