@@ -38,9 +38,9 @@ final class WebhookController
     /**
      * Receive one call from the RGE Studio Custom Connector.
      *
-     * An empty body is the connector's connection test. Every readable export answers 200,
-     * because RGE Studio shows nothing but an endless spinner for any other answer, and problems
-     * are flagged on the email.
+     * The shared secret is already checked by WebhookGuardSubscriber. An empty body is the
+     * connector's connection test. Every readable export answers 200, because RGE Studio shows
+     * nothing but an endless spinner for any other answer, and problems are flagged on the email.
      *
      * @param Request $request Incoming request
      *

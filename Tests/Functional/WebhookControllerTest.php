@@ -39,6 +39,34 @@ final class WebhookControllerTest extends MauticMysqlTestCase
     }
 
     /**
+     * Calls without the secret, or with a wrong one, are rejected.
+     *
+     * @return void
+     */
+    public function testRejectsCallsWithoutTheSecret(): void
+    {
+        $this->post($this->body(), null);
+        self::assertSame(Response::HTTP_UNAUTHORIZED, $this->client->getResponse()->getStatusCode());
+
+        $this->post($this->body(), 'wrong');
+        self::assertSame(Response::HTTP_UNAUTHORIZED, $this->client->getResponse()->getStatusCode());
+
+        self::assertSame(0, $this->em->getRepository(Email::class)->count([]));
+    }
+
+    /**
+     * A body over the limit is rejected before it is read.
+     *
+     * @return void
+     */
+    public function testRejectsBodiesOverTheLimit(): void
+    {
+        $this->post(str_repeat('x', 8192), self::SECRET);
+
+        self::assertSame(Response::HTTP_REQUEST_ENTITY_TOO_LARGE, $this->client->getResponse()->getStatusCode());
+    }
+
+    /**
      * The connector's connection test, an empty body, is answered with 200 and creates nothing.
      *
      * @return void
