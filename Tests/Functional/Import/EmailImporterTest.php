@@ -147,7 +147,6 @@ final class EmailImporterTest extends MauticMysqlTestCase
         $email->setPreheaderText('Typed in Mautic');
         $email->setPublishUp(new \DateTime('+1 day'));
         $email->setPublishDown(new \DateTime('+2 days'));
-        $email->setContinueSending(true);
         $email->setDateModified(new \DateTime('2020-01-01 00:00:00'));
         $admin = $this->em->find(User::class, 1);
         self::assertInstanceOf(User::class, $admin);
@@ -155,10 +154,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
         $email->setCheckedOutBy($admin);
         $this->em->persist($email);
         $this->em->flush();
-        $before = $this->email($first);
-        self::assertNotNull($before->getPublishDown());
-        self::assertTrue($before->getContinueSending());
-        $version = $before->getVersion();
+        self::assertNotNull($this->email($first)->getPublishDown());
         $this->em->clear();
 
         $second = $this->importer()->import($this->export(['subject' => 'New subject']), microtime(true));
@@ -171,11 +167,53 @@ final class EmailImporterTest extends MauticMysqlTestCase
         self::assertNull($updated->getPreheaderText());
         self::assertNull($updated->getPublishUp());
         self::assertNull($updated->getPublishDown());
-        self::assertFalse($updated->getContinueSending());
         self::assertCount(0, $updated->getExcludedLists());
-        self::assertSame($version + 1, $updated->getVersion());
         self::assertGreaterThan(new \DateTime('2021-01-01'), $updated->getDateModified());
         self::assertNotNull($updated->getCheckedOut());
+    }
+
+    /**
+     * Where Mautic's email has a version and continued sending (after 5.2), an update raises the version by one
+     * and a change of type stops continued sending.
+     *
+     * @return void
+     */
+    public function testUpdateRaisesTheVersionAndStopsContinuedSending(): void
+    {
+        if (!EmailImporter::emailHas('markForVersionIncrement') || !EmailImporter::emailHas('setContinueSending')) {
+            self::markTestSkipped('This Mautic has no email version or continued sending.');
+        }
+
+        $first = $this->importer()->import($this->export(['tags' => ['mautic-campaign']]), microtime(true));
+        $email = $this->email($first);
+        $email->setContinueSending(true);
+        $this->em->persist($email);
+        $this->em->flush();
+        $before = $this->email($first);
+        self::assertTrue($before->getContinueSending());
+        $version = $before->getVersion();
+        $this->em->clear();
+
+        $second = $this->importer()->import($this->export(['subject' => 'New subject']), microtime(true));
+
+        $updated = $this->email($second);
+        self::assertFalse($updated->getContinueSending());
+        self::assertSame($version + 1, $updated->getVersion());
+    }
+
+    /**
+     * The email features are found exactly where Mautic has them: on 7.2 and later, never on 5.2.
+     *
+     * @return void
+     */
+    public function testEmailFeaturesFollowTheMauticVersion(): void
+    {
+        $newer = class_exists(ProjectModel::class);
+
+        self::assertSame($newer, EmailImporter::emailHas('markForVersionIncrement'));
+        self::assertSame($newer, EmailImporter::emailHas('setContinueSending'));
+        self::assertTrue(EmailImporter::emailHas('setPublishDown'));
+        self::assertFalse(EmailImporter::emailHas('noSuchMethod'));
     }
 
     /**

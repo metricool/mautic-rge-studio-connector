@@ -8,7 +8,7 @@
     "require": {
         "php": "^8.2",
         "ext-json": "*",
-        "mautic/core-lib": "^7.2"
+        "mautic/core-lib": "^5.2 || ^7.2"
     },
     "extra": {
         "install-directory-name": "RgeStudioConnectorBundle"

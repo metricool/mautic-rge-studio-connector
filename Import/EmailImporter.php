@@ -51,6 +51,18 @@ class EmailImporter
     }
 
     /**
+     * Whether this Mautic's email has the method. Mautic 5.2 has no email version or continued sending.
+     *
+     * @param string $method Method name
+     *
+     * @return bool
+     */
+    public static function emailHas(string $method): bool
+    {
+        return (new \ReflectionClass(Email::class))->hasMethod($method);
+    }
+
+    /**
      * Check that the plugin can import: an import user and, where Mautic has projects, a valid project name.
      *
      * @return void
@@ -137,7 +149,9 @@ class EmailImporter
             $email = $this->newEmail($wanted);
         } else {
             $this->applyType($email, $wanted, $problems);
-            $email->markForVersionIncrement();
+            if (self::emailHas('markForVersionIncrement')) {
+                $email->markForVersionIncrement();
+            }
             $email->setDateModified(new \DateTime());
         }
 
@@ -310,7 +324,9 @@ class EmailImporter
         }
         $email->setPublishUp(null);
         $email->setPublishDown(null);
-        $email->setContinueSending(false);
+        if (self::emailHas('setContinueSending')) {
+            $email->setContinueSending(false);
+        }
         $email->setEmailType($wanted);
     }
 

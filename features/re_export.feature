@@ -23,11 +23,16 @@ Feature: Exporting the same design again
     And the email subject is "New subject"
     And one email exists for design 1234567
 
-  Scenario: An updated email stays unpublished and gets a new version
+  Scenario: An updated email stays unpublished
     When the design subject changes to "New subject"
     And RGE Studio sends the design with the secret "current-secret"
     Then the email is unpublished
-    And the email version went up by 1
+
+  @email-version
+  Scenario: An updated email gets a new version
+    When the design subject changes to "New subject"
+    And RGE Studio sends the design with the secret "current-secret"
+    Then the email version went up by 1
 
   @projects
   Scenario: An update puts the email back into the import project, once
