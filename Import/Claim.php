@@ -9,6 +9,7 @@ final class Claim
     public const CLAIMED     = 'claimed';
     public const UNCHANGED   = 'unchanged';
     public const IN_PROGRESS = 'in_progress';
+    public const SUPERSEDED  = 'superseded';
 
     /**
      * Build the outcome of claiming a design for one export.

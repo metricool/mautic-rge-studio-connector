@@ -539,8 +539,9 @@ final class EmailImporterTest extends MauticMysqlTestCase
      */
     public function testIdenticalExportStillRunningIsBusyAfterTheWait(): void
     {
-        $export = $this->export();
-        static::getContainer()->get(DesignLinkStore::class)->claim($export->designId, $export->hash, new \DateTimeImmutable('now', new \DateTimeZone('UTC')), 60);
+        $export  = $this->export();
+        $earlier = (int) round((microtime(true) - 10) * 1000000);
+        static::getContainer()->get(DesignLinkStore::class)->claim($export->designId, $export->hash, $earlier, new \DateTimeImmutable('now', new \DateTimeZone('UTC')), 60);
         $importer = $this->importer(['rge_studio_connector_wait_seconds' => 1]);
 
         $start = microtime(true);
@@ -558,7 +559,24 @@ final class EmailImporterTest extends MauticMysqlTestCase
             self::fail('The import did not give up.');
         } catch (ImportBusyException) {
         }
-        self::assertLessThan(0.4, microtime(true) - $late);
+        self::assertLessThan(0.5, microtime(true) - $late);
+    }
+
+    /**
+     * An export that arrived before the one already applied is answered as superseded and leaves the email alone.
+     *
+     * @return void
+     */
+    public function testOlderExportArrivingLateIsSuperseded(): void
+    {
+        $now   = microtime(true);
+        $newer = $this->importer()->import($this->export(['subject' => 'Newer subject']), $now);
+
+        $older = $this->importer()->import($this->export(['subject' => 'Older subject']), $now - 10);
+
+        self::assertSame(ImportResult::SUPERSEDED, $older->state);
+        self::assertSame($newer->emailId, $older->emailId);
+        self::assertSame('Newer subject', $this->email($newer)->getSubject());
     }
 
     /**

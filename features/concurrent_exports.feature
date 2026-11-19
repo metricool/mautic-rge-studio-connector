@@ -41,6 +41,28 @@ Feature: Exports of one design that arrive at the same time
     And when the older export finishes it answers with the result "superseded"
     And the email has the content of the latest export
 
+  Scenario: An export that arrives after a newer one was applied changes nothing
+    Given RGE Studio sent a newer export of design 1234567 with the secret "current-secret"
+    When an older export of design 1234567 arrives late with the secret "current-secret"
+    Then the webhook answers 200 with the result "superseded"
+    And the email has the content of the newer export
+
+  Scenario: An identical export waiting for one still running gives way to a newer export
+    Given an identical export of design 1234567 is being imported
+    And RGE Studio sends the design again with the secret "current-secret" and it waits
+    When a newer, different export of design 1234567 is applied
+    Then the waiting export answers with the result "superseded"
+    And when the export it waited for finishes it answers with the result "superseded"
+    And the email has the content of the newer export
+
+  Scenario: An older export never completes the claim of a newer export with the same content
+    Given an export of design 1234567 is being imported
+    And a different export of design 1234567 took it over
+    And a copy of the first export took it over again
+    When the first export finishes
+    Then it answers with the result "superseded"
+    And the copy still applies its content when it finishes
+
   Scenario: A failed import releases the design at once
     Given saving the email fails once
     When RGE Studio sends the design with the secret "current-secret"

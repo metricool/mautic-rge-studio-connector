@@ -22,6 +22,10 @@ class DesignLink
 
     private ?string $pendingHash = null;
 
+    private ?string $pendingArrival = null;
+
+    private ?string $lastArrival = null;
+
     private ?\DateTimeImmutable $claimedAt = null;
 
     private ?\DateTimeImmutable $dateModified = null;
@@ -45,6 +49,8 @@ class DesignLink
         $builder->createField('emailId', Types::INTEGER)->columnName('email_id')->nullable()->build();
         $builder->createField('payloadHash', Types::STRING)->columnName('payload_hash')->length(64)->nullable()->build();
         $builder->createField('pendingHash', Types::STRING)->columnName('pending_hash')->length(64)->nullable()->build();
+        $builder->createField('pendingArrival', Types::BIGINT)->columnName('pending_arrival')->nullable()->build();
+        $builder->createField('lastArrival', Types::BIGINT)->columnName('last_arrival')->nullable()->build();
         $builder->createField('claimedAt', Types::DATETIME_IMMUTABLE)->columnName('claimed_at')->nullable()->build();
         $builder->createField('dateModified', Types::DATETIME_IMMUTABLE)->columnName('date_modified')->nullable()->build();
     }
@@ -97,6 +103,26 @@ class DesignLink
     public function getPendingHash(): ?string
     {
         return $this->pendingHash;
+    }
+
+    /**
+     * When the request of the export being applied now arrived, in microseconds since 1970.
+     *
+     * @return string|null
+     */
+    public function getPendingArrival(): ?string
+    {
+        return $this->pendingArrival;
+    }
+
+    /**
+     * When the request of the newest export received for the design arrived, in microseconds since 1970.
+     *
+     * @return string|null
+     */
+    public function getLastArrival(): ?string
+    {
+        return $this->lastArrival;
     }
 
     /**

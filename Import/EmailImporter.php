@@ -93,10 +93,11 @@ class EmailImporter
     {
         $user      = $this->importUser();
         $projectId = $this->project->prepare($user);
+        $arrival   = $this->arrival($startedAt);
 
-        $claim = $this->claim($export, $startedAt);
+        $claim = $this->claim($export, $startedAt, $arrival);
         if (!$claim->isClaimed()) {
-            return new ImportResult(ImportResult::UNCHANGED, $claim->emailId);
+            return new ImportResult(Claim::SUPERSEDED === $claim->state ? ImportResult::SUPERSEDED : ImportResult::UNCHANGED, $claim->emailId);
         }
 
         $connection = $this->entityManager->getConnection();
@@ -115,15 +116,17 @@ class EmailImporter
             $wanted = $this->wantedType($export->tags, $problems);
 
             $connection->beginTransaction();
-            $lock = $this->store->lockForCompletion($export->designId, $export->hash);
-            $result = $lock['owned']
-                ? $this->save($export, $images->html, $problems, $wanted, $lock['emailId'], $projectId, $user)
-                : new ImportResult(ImportResult::SUPERSEDED, $lock['emailId']);
+            $lock   = $this->store->lockForCompletion($export->designId, $export->hash, $arrival);
+            $result = new ImportResult(ImportResult::SUPERSEDED, $lock['emailId']);
+            if ($lock['owned']) {
+                $result = $this->save($export, $images->html, $problems, $wanted, $lock['emailId'], $projectId, $user);
+                $this->store->complete($export->designId, $export->hash, $arrival, (int) $result->emailId, $this->now());
+            }
             $connection->commit();
 
             return $result;
         } catch (\Throwable $exception) {
-            $this->abandon($export);
+            $this->abandon($export, $arrival);
             throw $exception;
         }
     }
@@ -170,7 +173,6 @@ class EmailImporter
         $email->setDescription($this->description($export, $problems));
 
         $this->actAs->run($user, fn () => $this->emailModel->saveEntity($email, false));
-        $this->store->complete($export->designId, $export->hash, (int) $email->getId(), $this->now());
 
         return new ImportResult($state, $email->getId(), $this->count($problems));
     }
@@ -178,11 +180,12 @@ class EmailImporter
     /**
      * Undo a failed import: roll back its transaction and give up its claim on the design.
      *
-     * @param DesignExport $export Export that failed
+     * @param DesignExport $export  Export that failed
+     * @param int          $arrival When the request arrived, the claim's own mark
      *
      * @return void
      */
-    private function abandon(DesignExport $export): void
+    private function abandon(DesignExport $export, int $arrival): void
     {
         $connection = $this->entityManager->getConnection();
         if ($connection->isTransactionActive()) {
@@ -190,7 +193,7 @@ class EmailImporter
         }
 
         try {
-            $this->store->release($export->designId, $export->hash);
+            $this->store->release($export->designId, $export->hash, $arrival);
         } catch (\Throwable) {
         }
     }
@@ -199,21 +202,22 @@ class EmailImporter
      * Claim the design, waiting while an identical export of it is still being imported.
      *
      * The wait ends when that import finishes (unchanged), gives up its claim or goes stale (claimed by
-     * this export), or the wait time runs out.
+     * this export), a newer export of the design arrives (superseded), or the wait time runs out.
      *
      * @param DesignExport $export    Export to import
      * @param float        $startedAt Unix time with microseconds when the request arrived
+     * @param int          $arrival   The same time in whole microseconds, the claim's own mark
      *
      * @return Claim
      *
      * @throws ImportBusyException When the identical import is still running at the end of the wait
      */
-    private function claim(DesignExport $export, float $startedAt): Claim
+    private function claim(DesignExport $export, float $startedAt, int $arrival): Claim
     {
-        $claim = $this->store->claim($export->designId, $export->hash, $this->now(), $this->settings->claimSeconds());
+        $claim = $this->store->claim($export->designId, $export->hash, $arrival, $this->now(), $this->settings->claimSeconds());
         while (Claim::IN_PROGRESS === $claim->state && microtime(true) < $startedAt + $this->settings->waitSeconds()) {
             usleep(500000);
-            $claim = $this->store->claim($export->designId, $export->hash, $this->now(), $this->settings->claimSeconds());
+            $claim = $this->store->claim($export->designId, $export->hash, $arrival, $this->now(), $this->settings->claimSeconds());
         }
 
         if (Claim::IN_PROGRESS === $claim->state) {
@@ -423,6 +427,18 @@ class EmailImporter
         }
 
         return $user;
+    }
+
+    /**
+     * Request arrival in whole microseconds since 1970, which orders the exports of a design.
+     *
+     * @param float $startedAt Unix time with microseconds when the request arrived
+     *
+     * @return int
+     */
+    private function arrival(float $startedAt): int
+    {
+        return (int) round($startedAt * 1000000);
     }
 
     /**

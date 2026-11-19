@@ -28,9 +28,11 @@ final class DesignLinkTest extends TestCase
             'designId'     => ['design_id', 'string', 64, false],
             'emailId'      => ['email_id', 'integer', null, true],
             'payloadHash'  => ['payload_hash', 'string', 64, true],
-            'pendingHash'  => ['pending_hash', 'string', 64, true],
-            'claimedAt'    => ['claimed_at', 'datetime_immutable', null, true],
-            'dateModified' => ['date_modified', 'datetime_immutable', null, true],
+            'pendingHash'    => ['pending_hash', 'string', 64, true],
+            'pendingArrival' => ['pending_arrival', 'bigint', null, true],
+            'lastArrival'    => ['last_arrival', 'bigint', null, true],
+            'claimedAt'      => ['claimed_at', 'datetime_immutable', null, true],
+            'dateModified'   => ['date_modified', 'datetime_immutable', null, true],
         ];
         foreach ($expected as $field => [$column, $type, $length, $nullable]) {
             $mapping = $metadata->getFieldMapping($field);
@@ -56,6 +58,8 @@ final class DesignLinkTest extends TestCase
         self::assertNull($link->getEmailId());
         self::assertNull($link->getPayloadHash());
         self::assertNull($link->getPendingHash());
+        self::assertNull($link->getPendingArrival());
+        self::assertNull($link->getLastArrival());
         self::assertNull($link->getClaimedAt());
         self::assertNull($link->getDateModified());
     }

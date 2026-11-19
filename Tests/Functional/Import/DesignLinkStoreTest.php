@@ -28,18 +28,19 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     }
 
     /**
-     * The first export of a design claims it, with no email yet.
+     * The first export of a design claims it, with no email yet, and only that claim owns it.
      *
      * @return void
      */
     public function testFirstExportClaimsTheDesign(): void
     {
-        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
 
         self::assertSame(Claim::CLAIMED, $claim->state);
         self::assertTrue($claim->isClaimed());
         self::assertNull($claim->emailId);
-        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('a'))['owned']);
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 101)['owned']);
     }
 
     /**
@@ -49,77 +50,173 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
      */
     public function testIdenticalExportWhileTheFirstRunsIsInProgress(): void
     {
-        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
 
-        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now('+5 seconds'), 60);
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now('+5 seconds'), 60);
 
         self::assertSame(Claim::IN_PROGRESS, $claim->state);
         self::assertFalse($claim->isClaimed());
     }
 
     /**
-     * A claim older than the claim time no longer holds back an identical export.
+     * A claim older than the claim time no longer holds back an identical export, which then owns the design.
      *
      * @return void
      */
     public function testStaleClaimIsTakenOver(): void
     {
-        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now('-120 seconds'), 60);
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now('-120 seconds'), 60);
 
-        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60);
 
         self::assertSame(Claim::CLAIMED, $claim->state);
+        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 200)['owned']);
     }
 
     /**
-     * A claim exactly as old as the claim time is already stale.
+     * A claim exactly as old as the claim time is already stale, one second younger is not.
      *
      * @return void
      */
     public function testClaimAtTheClaimTimeIsStale(): void
     {
-        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now('-60 seconds'), 60);
+        $now = new \DateTimeImmutable('2026-01-01 12:00:00', new \DateTimeZone('UTC'));
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $now->modify('-60 seconds'), 60);
+        $this->store->claim('7654321', $this->hash('a'), 100, $now->modify('-59 seconds'), 60);
 
-        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
-
-        self::assertSame(Claim::CLAIMED, $claim->state);
+        self::assertSame(Claim::CLAIMED, $this->store->claim(self::DESIGN, $this->hash('a'), 200, $now, 60)->state);
+        self::assertSame(Claim::IN_PROGRESS, $this->store->claim('7654321', $this->hash('a'), 200, $now, 60)->state);
     }
 
     /**
-     * A different export takes the design over, and the one it replaced no longer owns it.
+     * A newer, different export takes the design over, and the one it replaced no longer owns it.
      *
      * @return void
      */
     public function testNewerExportTakesTheDesignOver(): void
     {
-        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
 
-        $claim = $this->store->claim(self::DESIGN, $this->hash('b'), $this->now(), 60);
+        $claim = $this->store->claim(self::DESIGN, $this->hash('b'), 200, $this->now(), 60);
 
         self::assertSame(Claim::CLAIMED, $claim->state);
-        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'))['owned']);
-        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('b'))['owned']);
+        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('b'), 200)['owned']);
     }
 
     /**
-     * The export last applied is unchanged when sent again, and it stops an older export still running.
+     * An export that arrived before one still running is superseded, and the newer one keeps the design.
+     *
+     * @return void
+     */
+    public function testOlderExportIsSupersededByANewerOneRunning(): void
+    {
+        $this->store->claim(self::DESIGN, $this->hash('b'), 200, $this->now(), 60);
+
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+
+        self::assertSame(Claim::SUPERSEDED, $claim->state);
+        self::assertFalse($claim->isClaimed());
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('b'), 200)['owned']);
+    }
+
+    /**
+     * An export that arrived before the one already applied is superseded and never overwrites it.
+     *
+     * @return void
+     */
+    public function testOlderExportIsSupersededByAnAppliedNewerOne(): void
+    {
+        $email = $this->email();
+        $this->store->claim(self::DESIGN, $this->hash('b'), 200, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('b'), 200, (int) $email->getId(), $this->now());
+
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+
+        self::assertSame(Claim::SUPERSEDED, $claim->state);
+        self::assertSame($email->getId(), $claim->emailId);
+    }
+
+    /**
+     * An identical export waiting for one still running gives way when a newer export is applied meanwhile, and the
+     * export it waited for can no longer complete.
+     *
+     * @return void
+     */
+    public function testWaitingIdenticalExportGivesWayToANewerOne(): void
+    {
+        $email = $this->email();
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        self::assertSame(Claim::IN_PROGRESS, $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60)->state);
+
+        $this->store->claim(self::DESIGN, $this->hash('b'), 300, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('b'), 300, (int) $email->getId(), $this->now());
+
+        self::assertSame(Claim::SUPERSEDED, $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60)->state);
+        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+    }
+
+    /**
+     * Two claims with the same content are told apart: an older one can neither complete nor release the newer one.
+     *
+     * @return void
+     */
+    public function testEachClaimOnlyCompletesAndReleasesItself(): void
+    {
+        $email = $this->email();
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $this->store->claim(self::DESIGN, $this->hash('b'), 200, $this->now(), 60);
+        self::assertSame(Claim::CLAIMED, $this->store->claim(self::DESIGN, $this->hash('a'), 300, $this->now(), 60)->state);
+
+        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+        $this->store->release(self::DESIGN, $this->hash('a'), 100);
+        $this->store->complete(self::DESIGN, $this->hash('a'), 100, (int) $email->getId(), $this->now());
+
+        $lock = $this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 300);
+        self::assertTrue($lock['owned']);
+        self::assertNull($lock['emailId']);
+    }
+
+    /**
+     * The export last applied is unchanged when sent again, it stops an older export still running, and it counts as
+     * the newest export received.
      *
      * @return void
      */
     public function testAppliedExportIsUnchangedAndStopsAnOlderOne(): void
     {
         $email = $this->email();
-        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
-        $this->store->complete(self::DESIGN, $this->hash('a'), (int) $email->getId(), $this->now());
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('a'), 100, (int) $email->getId(), $this->now());
 
-        $older = $this->store->claim(self::DESIGN, $this->hash('b'), $this->now(), 60);
+        $older = $this->store->claim(self::DESIGN, $this->hash('b'), 200, $this->now(), 60);
         self::assertSame(Claim::CLAIMED, $older->state);
         self::assertSame($email->getId(), $older->emailId);
 
-        $same = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+        $same = $this->store->claim(self::DESIGN, $this->hash('a'), 300, $this->now(), 60);
         self::assertSame(Claim::UNCHANGED, $same->state);
         self::assertSame($email->getId(), $same->emailId);
-        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('b'))['owned']);
+        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('b'), 200)['owned']);
+        self::assertSame(Claim::SUPERSEDED, $this->store->claim(self::DESIGN, $this->hash('c'), 250, $this->now(), 60)->state);
+    }
+
+    /**
+     * A copy of the applied export that arrived before a newer, different export does not stop that newer export.
+     *
+     * @return void
+     */
+    public function testEarlierCopyOfTheAppliedExportLeavesANewerOneRunning(): void
+    {
+        $email = $this->email();
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('a'), 100, (int) $email->getId(), $this->now());
+        $this->store->claim(self::DESIGN, $this->hash('b'), 300, $this->now(), 60);
+
+        $same = $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60);
+
+        self::assertSame(Claim::UNCHANGED, $same->state);
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('b'), 300)['owned']);
     }
 
     /**
@@ -129,10 +226,10 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
      */
     public function testReleasedClaimDoesNotHoldBackTheNextExport(): void
     {
-        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
-        $this->store->release(self::DESIGN, $this->hash('a'));
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $this->store->release(self::DESIGN, $this->hash('a'), 100);
 
-        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60);
 
         self::assertSame(Claim::CLAIMED, $claim->state);
     }
@@ -145,12 +242,12 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     public function testDeletedEmailIsNotReused(): void
     {
         $email = $this->email();
-        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
-        $this->store->complete(self::DESIGN, $this->hash('a'), (int) $email->getId(), $this->now());
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('a'), 100, (int) $email->getId(), $this->now());
         $this->em->remove($email);
         $this->em->flush();
 
-        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60);
 
         self::assertSame(Claim::CLAIMED, $claim->state);
         self::assertNull($claim->emailId);
