@@ -72,6 +72,20 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     }
 
     /**
+     * A claim exactly as old as the claim time is already stale.
+     *
+     * @return void
+     */
+    public function testClaimAtTheClaimTimeIsStale(): void
+    {
+        $this->store->claim(self::DESIGN, $this->hash('a'), $this->now('-60 seconds'), 60);
+
+        $claim = $this->store->claim(self::DESIGN, $this->hash('a'), $this->now(), 60);
+
+        self::assertSame(Claim::CLAIMED, $claim->state);
+    }
+
+    /**
      * A different export takes the design over, and the one it replaced no longer owns it.
      *
      * @return void

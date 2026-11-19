@@ -231,6 +231,44 @@ final class EmailUsageTest extends MauticMysqlTestCase
     }
 
     /**
+     * A campaign step that sends the email is found by its properties alone.
+     *
+     * @return void
+     */
+    public function testCampaignStepFoundByItsPropertiesAlone(): void
+    {
+        $email = $this->email();
+        $this->campaignEvent('email.send', ['email' => $email->getId()]);
+        $this->em->flush();
+
+        self::assertTrue($this->usage->isUsedByActions((int) $email->getId()));
+    }
+
+    /**
+     * Steps and actions of other types do not count, even when their properties name the email.
+     *
+     * @return void
+     */
+    public function testOtherActionTypesAreIgnored(): void
+    {
+        $email   = $this->email();
+        $form    = new Form();
+        $trigger = new Trigger();
+        $form->setName('RGE Studio usage test');
+        $form->setAlias('rgeother');
+        $trigger->setName('RGE Studio usage test');
+        $this->em->persist($form);
+        $this->em->persist($trigger);
+
+        $this->campaignEvent('lead.changepoints', ['email' => $email->getId()]);
+        $this->formAction($form, 'lead.pointschange', ['email' => $email->getId()]);
+        $this->triggerEvent($trigger, 'lead.changelists', ['email' => $email->getId()]);
+        $this->em->flush();
+
+        self::assertFalse($this->usage->isUsedByActions((int) $email->getId()));
+    }
+
+    /**
      * Actions that send another email do not count.
      *
      * @return void

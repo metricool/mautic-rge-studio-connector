@@ -32,7 +32,7 @@ class UnsubscribeLinkChecker
      */
     public function normalise(string $html): string
     {
-        return (string) preg_replace('/(\shref\s*=\s*["\']?)\s*(?:https?:)?\/\/(\{[a-z_]+\})(?=["\'\s>])/i', '$1$2', $html);
+        return preg_replace('/(\shref\s*=\s*["\']?)\s*(?:https?:)?\/\/(\{[a-z_]+\})(?=["\'\s>])/i', '$1$2', $html) ?? '';
     }
 
     /**
@@ -57,7 +57,7 @@ class UnsubscribeLinkChecker
     private function linkProblems(string $html): array
     {
         $problems = [];
-        $visible  = (string) preg_replace('/<!--.*?-->/s', '', $html);
+        $visible  = preg_replace('/<!--.*?-->/s', '', $html) ?? '';
         $outside  = $this->scan($visible);
         $anywhere = $this->scan($html);
 
@@ -146,7 +146,7 @@ class UnsubscribeLinkChecker
             $found = $this->scanTag($tag, $found);
         }
 
-        $text = (string) preg_replace('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>|<[\/!][^>]*>/s', ' ', $html);
+        $text = preg_replace('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>|<[\/!][^>]*>/s', ' ', $html) ?? '';
         if (str_contains($text, self::TEXT_TOKEN)) {
             $found['working'] = true;
         }

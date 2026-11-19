@@ -69,12 +69,7 @@ class DesignExportParser
             return null;
         }
 
-        $last = end($numbers[0]);
-        if (false === $last) {
-            return null;
-        }
-
-        $trimmed = ltrim($last, '0');
+        $trimmed = ltrim((string) end($numbers[0]), '0');
 
         return '' === $trimmed ? '0' : $trimmed;
     }

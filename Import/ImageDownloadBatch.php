@@ -64,7 +64,7 @@ final class ImageDownloadBatch
      *
      * @return void
      */
-    public function fail(string $url, string $error, bool $retry = false): void
+    public function fail(string $url, string $error, bool $retry): void
     {
         $this->outcomes[$url] = $retry ? ['error' => $error, 'retry' => true] : ['error' => $error];
     }
@@ -130,7 +130,7 @@ final class ImageDownloadBatch
     public function cancelRemaining(): void
     {
         foreach (array_keys($this->active) as $url) {
-            $this->stop($url, 'Not copied in time.');
+            $this->stop($url, 'Not copied in time.', false);
         }
     }
 
@@ -162,8 +162,8 @@ final class ImageDownloadBatch
         }
 
         $length = $response->getHeaders(false)['content-length'][0] ?? null;
-        if (is_numeric($length) && (int) $length > $this->maxBytes) {
-            $this->stop($url, 'The image is larger than the limit.');
+        if (is_numeric($length) && $length > $this->maxBytes) {
+            $this->stop($url, 'The image is larger than the limit.', false);
 
             return false;
         }
@@ -171,7 +171,7 @@ final class ImageDownloadBatch
         $path = tempnam($this->directory, '.rge');
         $file = false === $path ? false : fopen($path, 'wb');
         if (false === $path || false === $file) {
-            $this->stop($url, 'The image folder is not writable.');
+            $this->stop($url, 'The image folder is not writable.', false);
 
             return false;
         }
@@ -196,9 +196,9 @@ final class ImageDownloadBatch
             return false;
         }
 
-        $this->sizes[$url] = ($this->sizes[$url] ?? 0) + strlen($content);
+        $this->sizes[$url] += strlen($content);
         if ($this->sizes[$url] > $this->maxBytes) {
-            $this->stop($url, 'The image is larger than the limit.');
+            $this->stop($url, 'The image is larger than the limit.', false);
 
             return false;
         }
@@ -233,7 +233,7 @@ final class ImageDownloadBatch
      *
      * @return void
      */
-    private function stop(string $url, string $error, bool $retry = false): void
+    private function stop(string $url, string $error, bool $retry): void
     {
         if (isset($this->active[$url])) {
             $this->active[$url]->cancel();

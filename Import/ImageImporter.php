@@ -39,7 +39,7 @@ class ImageImporter
     public function import(string $html, float $deadline): ImageImportResult
     {
         $references = $this->references($html);
-        $urls       = array_values(array_unique(array_values($references)));
+        $urls       = array_values(array_unique($references));
         $outcomes   = $this->copyAll(array_slice($urls, 0, $this->settings->maxImages()), $deadline);
 
         foreach (array_slice($urls, $this->settings->maxImages()) as $url) {
@@ -48,24 +48,22 @@ class ImageImporter
 
         uksort($references, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
-        $copied   = [];
         $failures = [];
         $search   = [];
         $replace  = [];
         foreach ($references as $raw => $url) {
-            $outcome   = $outcomes[$url] ?? ['error' => 'Not copied in time.'];
+            $outcome   = $outcomes[$url];
             $search[]  = $raw;
             $replace[] = $outcome['url'] ?? '';
-            if (isset($outcome['url'])) {
-                $copied[$url] = true;
-            } else {
+            if (!isset($outcome['url'])) {
                 $failures[$url] = ['url' => $url, 'reason' => $outcome['error'] ?? 'Not copied.'];
             }
         }
 
-        $html = str_replace($search, $replace, $html);
+        $html   = str_replace($search, $replace, $html);
+        $copied = count(array_filter($outcomes, static fn (array $outcome): bool => isset($outcome['url'])));
 
-        return new ImageImportResult($html, count($copied), array_values(array_merge($failures, $this->leftovers($html))));
+        return new ImageImportResult($html, $copied, array_merge(array_values($failures), $this->leftovers($html)));
     }
 
     /**
@@ -80,7 +78,7 @@ class ImageImporter
      *
      * @return array<string, string> Text as found in the HTML, mapped to the address to download
      */
-    public function references(string $html): array
+    private function references(string $html): array
     {
         $found = array_merge(
             $this->attributeAddresses($html),
@@ -124,11 +122,11 @@ class ImageImporter
      */
     private function srcsetAddresses(string $html): array
     {
-        preg_match_all('/\bsrcset\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $html, $matches, PREG_SET_ORDER);
+        preg_match_all('/\bsrcset\s*=\s*(["\'])(.*?)\1/is', $html, $matches);
 
         $found = [];
-        foreach ($matches as $match) {
-            preg_match_all('/[\s,]*([^\s,](?:\S*[^\s,])?)(?:,+|\s+[^,]*)?/', ($match[1] ?? '').($match[2] ?? ''), $candidates);
+        foreach ($matches[2] as $list) {
+            preg_match_all('/[\s,]*([^\s,](?:\S*[^\s,])?)(?:,+|\s+[^,]*)?/', $list, $candidates);
             array_push($found, ...$candidates[1]);
         }
 
@@ -144,7 +142,7 @@ class ImageImporter
      */
     private function cssAddresses(string $html): array
     {
-        $css = (string) preg_replace(['/@import[^;]*;/i', '/@font-face\s*\{[^}]*\}/i'], '', $html);
+        $css = preg_replace(['/@import[^;]*;/i', '/@font-face\s*\{[^}]*\}/i'], '', $html) ?? '';
         preg_match_all('/url\(\s*((?:&quot;|&apos;|&#0*(?:34|39);|&#x0*(?:22|27);|["\'])?)([^"\')]+?)\1\s*\)/i', $css, $matches);
 
         return $matches[2];
@@ -199,14 +197,14 @@ class ImageImporter
      *
      * @param string $html Email HTML with the copies in place
      *
-     * @return array<string, array{url: string, reason: string}>
+     * @return list<array{url: string, reason: string}>
      */
     private function leftovers(string $html): array
     {
         $failures = [];
         foreach ($this->settings->designerHosts() as $host) {
             if (false !== stripos($html, $host)) {
-                $failures['host:'.$host] = ['url' => $host, 'reason' => 'An address on the designer\'s storage is still in the HTML.'];
+                $failures[] = ['url' => $host, 'reason' => 'An address on the designer\'s storage is still in the HTML.'];
             }
         }
 
@@ -287,7 +285,7 @@ class ImageImporter
     {
         $remaining = $deadline - microtime(true);
         if ($remaining < 0.5) {
-            $batch->fail($url, 'Not copied in time.');
+            $batch->fail($url, 'Not copied in time.', false);
 
             return;
         }

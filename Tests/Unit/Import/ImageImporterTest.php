@@ -9,6 +9,7 @@ use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\SettingsStub;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
@@ -171,22 +172,394 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * Each download asks for an image, follows few redirects and stays within the time left.
+     *
+     * @return void
+     */
+    public function testRequestsCarryTheDownloadOptions(): void
+    {
+        $requests = $this->log();
+        $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse(self::PNG)))
+            ->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertCount(1, $requests);
+        $request = $requests->getArrayCopy()[0];
+        $options = $request['options'];
+        $headers = $options['normalized_headers'];
+        self::assertIsArray($headers);
+        self::assertSame('GET', $request['method']);
+        self::assertSame('https://cdn.example.org/a.png', $request['url']);
+        self::assertSame(3, $options['max_redirects']);
+        self::assertSame(['Accept: image/*'], $headers['accept']);
+        self::assertSame('https://cdn.example.org/a.png', $options['user_data']);
+        self::assertLessThanOrEqual(10.0, $options['timeout']);
+        self::assertGreaterThan(9.0, $options['timeout']);
+        self::assertGreaterThan(25.0, $options['max_duration']);
+        self::assertLessThanOrEqual(30.0, $options['max_duration']);
+    }
+
+    /**
+     * Server errors and rate limits are tried again, other answers are not.
+     *
+     * @param int $status   Status the image server answers
+     * @param int $attempts Downloads expected
+     *
+     * @return void
+     */
+    #[DataProvider('answers')]
+    public function testOnlyServerErrorsAreTriedAgain(int $status, int $attempts): void
+    {
+        $requests = $this->log();
+        $result   = $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse('', ['http_code' => $status])))
+            ->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertCount($attempts, $requests);
+        self::assertSame([['url' => 'https://cdn.example.org/a.png', 'reason' => 'The image server answered '.$status.'.']], $result->failures);
+    }
+
+    /**
+     * Statuses and how many downloads each one gets.
+     *
+     * @return iterable<string, array{int, int}>
+     */
+    public static function answers(): iterable
+    {
+        yield 'service unavailable' => [503, 2];
+        yield 'server error' => [500, 2];
+        yield 'rate limited' => [429, 2];
+        yield 'client error just under 500' => [499, 1];
+        yield 'not found' => [404, 1];
+    }
+
+    /**
+     * A failure that may pass later is tried again and can then succeed.
+     *
+     * @return void
+     */
+    public function testAServerErrorThenAnImageIsCopied(): void
+    {
+        $requests = $this->log();
+        $client   = $this->recording($requests, static fn (string $method, string $url, array $options, int $count): MockResponse => 1 === $count
+            ? new MockResponse('', ['http_code' => 503])
+            : new MockResponse(self::PNG));
+
+        $result = $this->importer($client)->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertCount(2, $requests);
+        self::assertSame([], $result->failures);
+        self::assertSame(1, $result->copied);
+    }
+
+    /**
+     * Copied images, rejected files and images over the limit are downloaded only once.
+     *
+     * @return void
+     */
+    public function testFinalAnswersAreNotDownloadedAgain(): void
+    {
+        $requests = $this->log();
+        $client   = $this->recording($requests, static fn (string $method, string $url): MockResponse => match (true) {
+            str_contains($url, 'page') => new MockResponse('<html>not an image</html>'),
+            str_contains($url, 'large') => new MockResponse(str_repeat('x', 2048), ['response_headers' => ['content-length' => '2048']]),
+            default => new MockResponse(self::PNG),
+        });
+
+        $result = $this->importer($client, ['rge_studio_connector_max_image_bytes' => 1024])->import(
+            '<img src="https://cdn.example.org/a.png"><img src="https://cdn.example.org/a.png">'
+            .'<img src="https://cdn.example.org/page.png"><img src="https://cdn.example.org/large.png">',
+            microtime(true) + 30
+        );
+
+        self::assertCount(3, $requests);
+        self::assertSame(1, $result->copied);
+        self::assertEqualsCanonicalizing([
+            ['url' => 'https://cdn.example.org/page.png', 'reason' => 'The file is not a PNG, JPEG, GIF or WebP image.'],
+            ['url' => 'https://cdn.example.org/large.png', 'reason' => 'The image is larger than the limit.'],
+        ], $result->failures);
+    }
+
+    /**
+     * An image of exactly the limit is copied and one byte more is not.
+     *
+     * @return void
+     */
+    public function testSizeLimitIsExact(): void
+    {
+        $exact  = self::PNG.str_repeat("\0", 1024 - strlen(self::PNG));
+        $client = new MockHttpClient(static fn (string $method, string $url): MockResponse => new MockResponse(str_contains($url, 'over') ? $exact."\0" : $exact));
+
+        $result = $this->importer($client, ['rge_studio_connector_max_image_bytes' => 1024])->import(
+            '<img src="https://cdn.example.org/exact.png"><img src="https://cdn.example.org/over.png">',
+            microtime(true) + 30
+        );
+
+        self::assertSame(1, $result->copied);
+        self::assertSame([['url' => 'https://cdn.example.org/over.png', 'reason' => 'The image is larger than the limit.']], $result->failures);
+    }
+
+    /**
+     * Addresses outside the designer's storage are found in every quote style and srcset entry.
+     *
+     * @return void
+     */
+    public function testFindsImagesInEveryQuoteStyle(): void
+    {
+        $client = new MockHttpClient(static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $html   = '<img src="https://cdn.example.org/1.png"><img src=\'https://cdn.example.org/2.png\'><img src=https://cdn.example.org/3.png>'
+            .'<img srcset="https://cdn.example.org/4.png 1x, https://cdn.example.org/5.png 2x"><img srcset=\'https://cdn.example.org/6.png 2x\'>'
+            .'<img src=" https://cdn.example.org/7.png ">';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $copy = fn (int $number): string => 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG.'https://cdn.example.org/'.$number.'.png').'.png';
+        self::assertSame(7, $result->copied);
+        self::assertSame(
+            '<img src="'.$copy(1).'"><img src=\''.$copy(2).'\'><img src='.$copy(3).'>'
+            .'<img srcset="'.$copy(4).' 1x, '.$copy(5).' 2x"><img srcset=\''.$copy(6).' 2x\'>'
+            .'<img src=" '.$copy(7).' ">',
+            $result->html
+        );
+    }
+
+    /**
+     * An address that starts like another one is replaced by its own copy.
+     *
+     * @return void
+     */
+    public function testLongerAddressesAreReplacedFirst(): void
+    {
+        $client = new MockHttpClient(static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $result = $this->importer($client)->import(
+            '<img src="https://cdn.example.org/a.png"><img src="https://cdn.example.org/a.png?w=2">',
+            microtime(true) + 30
+        );
+
+        $copy = fn (string $url): string => 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG.$url).'.png';
+        self::assertSame('<img src="'.$copy('https://cdn.example.org/a.png').'"><img src="'.$copy('https://cdn.example.org/a.png?w=2').'">', $result->html);
+    }
+
+    /**
+     * Two spellings of one address are downloaded once and both point to the copy.
+     *
+     * @return void
+     */
+    public function testTwoSpellingsOfOneAddressAreDownloadedOnce(): void
+    {
+        $requests = $this->log();
+        $result   = $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse(self::PNG)))
+            ->import('<img src="//cdn.example.org/a.png"><img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        $copy = 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG).'.png';
+        self::assertCount(1, $requests);
+        self::assertSame('<img src="'.$copy.'"><img src="'.$copy.'">', $result->html);
+    }
+
+    /**
+     * Images over the per-export limit are not downloaded.
+     *
+     * @return void
+     */
+    public function testImagesOverThePerExportLimit(): void
+    {
+        $requests = $this->log();
+        $result   = $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse(self::PNG)), ['rge_studio_connector_max_images' => 1])
+            ->import('<img src="https://cdn.example.org/a.png"><img src="https://cdn.example.org/b.png">', microtime(true) + 30);
+
+        self::assertCount(1, $requests);
+        self::assertSame([['url' => 'https://cdn.example.org/b.png', 'reason' => 'Too many images in one export.']], $result->failures);
+    }
+
+    /**
+     * Every designer host left in the HTML is reported, and only real designer hosts count.
+     *
+     * @return void
+     */
+    public function testLeftoverDesignerAddressesAreReported(): void
+    {
+        $requests = $this->log();
+        $result   = $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse(self::PNG)))
+            ->import('<p>See media.beefree.cloud and imgdist.com, not https://mediaxbeefree.cloud/a.png</p>', microtime(true) + 30);
+
+        self::assertCount(0, $requests);
+        self::assertSame([
+            ['url' => 'media.beefree.cloud', 'reason' => 'An address on the designer\'s storage is still in the HTML.'],
+            ['url' => 'imgdist.com', 'reason' => 'An address on the designer\'s storage is still in the HTML.'],
+        ], $result->failures);
+    }
+
+    /**
+     * Addresses are read without regard to case, and only Mautic's own address counts as Mautic's.
+     *
+     * @return void
+     */
+    public function testAddressesAreReadWithoutRegardToCase(): void
+    {
+        $requests = $this->log();
+        $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse(self::PNG)))->import(
+            '<img src="HTTPS://CDN.EXAMPLE.ORG/A.PNG"><img src="https://cdn.example.org/b.png?n=%7bcontactfield%7d">'
+            .'<img src="https://mautic.example.com.example.org/c.png"><img src="https://mautic.example.com/media/images/d.png">'
+            .'<img src="https://cdn.example.org/e.png&#32;"><img src="https://cdn.example.org/f.png?a=1&amp;b=&apos;2&apos;">',
+            microtime(true) + 30
+        );
+
+        self::assertSame([
+            'https://cdn.example.org/A.PNG',
+            'https://mautic.example.com.example.org/c.png',
+            'https://cdn.example.org/e.png',
+            "https://cdn.example.org/f.png?a=1&b='2'",
+        ], array_column($requests->getArrayCopy(), 'url'));
+    }
+
+    /**
+     * PNG, JPEG, both GIF versions and WebP are kept with their own extension, other RIFF files are not.
+     *
+     * @return void
+     */
+    public function testImageFormats(): void
+    {
+        $files = [
+            'png'  => self::PNG,
+            'jpg'  => "\xFF\xD8\xFF\xE0".str_repeat("\0", 12),
+            'gif'  => 'GIF87a'.str_repeat("\0", 10),
+            'gif2' => 'GIF89a'.str_repeat("\1", 10),
+            'webp' => "RIFF\x24\x00\x00\x00WEBPVP8 ",
+            'wave' => "RIFF\x24\x00\x00\x00WAVEfmt ",
+        ];
+        $client = new MockHttpClient(static fn (string $method, string $url): MockResponse => new MockResponse($files[basename($url)]));
+
+        $result = $this->importer($client)->import(implode('', array_map(static fn (string $name): string => '<img src="https://cdn.example.org/'.$name.'">', array_keys($files))), microtime(true) + 30);
+
+        foreach (['png', 'jpg', 'gif', 'webp'] as $extension) {
+            self::assertStringContainsString(hash('sha256', $files[$extension]).'.'.$extension, $result->html);
+        }
+        self::assertStringContainsString(hash('sha256', $files['gif2']).'.gif', $result->html);
+        self::assertSame([['url' => 'https://cdn.example.org/wave', 'reason' => 'The file is not a PNG, JPEG, GIF or WebP image.']], $result->failures);
+    }
+
+    /**
+     * Copies can be read by the web server, and the image folder is created when missing.
+     *
+     * @return void
+     */
+    public function testCopiesCanBeReadByTheWebServer(): void
+    {
+        $previous = umask(0);
+        try {
+            $this->importer(new MockHttpClient(new MockResponse(self::PNG)))->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+        } finally {
+            umask($previous);
+        }
+
+        $folder = $this->root.'/media/images/rge-studio';
+        self::assertSame(0775, fileperms($folder) & 0777);
+        self::assertSame(0644, fileperms($folder.'/'.hash('sha256', self::PNG).'.png') & 0777);
+    }
+
+    /**
+     * The public address joins Mautic's address and the images path with single slashes.
+     *
+     * @return void
+     */
+    public function testPublicAddressHasSingleSlashes(): void
+    {
+        $result = $this->importer(new MockHttpClient(new MockResponse(self::PNG)), [], '/media/images/')
+            ->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertSame('<img src="https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG).'.png">', $result->html);
+    }
+
+    /**
+     * Nothing is downloaded once the time is up.
+     *
+     * @return void
+     */
+    public function testNothingStartsAfterTheDeadline(): void
+    {
+        $requests = $this->log();
+        $result   = $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse(self::PNG)))
+            ->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 0.2);
+
+        self::assertCount(0, $requests);
+        self::assertSame([['url' => 'https://cdn.example.org/a.png', 'reason' => 'Not copied in time.']], $result->failures);
+    }
+
+    /**
+     * Network failures are tried again with their own reason.
+     *
+     * @return void
+     */
+    public function testNetworkFailuresAreTriedAgain(): void
+    {
+        $requests = $this->log();
+        $result   = $this->importer($this->recording($requests, static fn (): MockResponse => new MockResponse('', ['error' => 'connection reset'])))
+            ->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertCount(2, $requests);
+        self::assertSame([['url' => 'https://cdn.example.org/a.png', 'reason' => 'The download failed.']], $result->failures);
+    }
+
+    /**
+     * A download that cannot even start is tried again with its own reason.
+     *
+     * @return void
+     */
+    public function testDownloadsThatCannotStartAreTriedAgain(): void
+    {
+        $requests = $this->log();
+        $result   = $this->importer($this->recording($requests, static function (): MockResponse {
+            throw new TransportException('no route');
+        }))->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertCount(2, $requests);
+        self::assertSame([['url' => 'https://cdn.example.org/a.png', 'reason' => 'The download could not start.']], $result->failures);
+    }
+
+    /**
+     * Empty list of requests for a recording client to fill in.
+     *
+     * @return \ArrayObject<int, array{method: string, url: string, options: array<mixed>}>
+     */
+    private function log(): \ArrayObject
+    {
+        return new \ArrayObject();
+    }
+
+    /**
+     * Client that records every request before answering it.
+     *
+     * @param \ArrayObject<int, array{method: string, url: string, options: array<mixed>}> $requests Requests made, filled in by the client
+     * @param callable(string, string, array<mixed>, int): MockResponse                    $answer   Builds the answer from method, address, options and the request number
+     *
+     * @return MockHttpClient
+     */
+    private function recording(\ArrayObject $requests, callable $answer): MockHttpClient
+    {
+        return new MockHttpClient(static function (string $method, string $url, array $options) use ($requests, $answer): MockResponse {
+            $requests[] = ['method' => $method, 'url' => $url, 'options' => $options];
+
+            return $answer($method, $url, $options, count($requests));
+        });
+    }
+
+    /**
      * Importer writing under the temporary root.
      *
-     * @param MockHttpClient $client HTTP client that answers the downloads
+     * @param MockHttpClient       $client     HTTP client that answers the downloads
+     * @param array<string, mixed> $parameters Settings to change
+     * @param string               $relative   Images path as Mautic gives it
      *
      * @return ImageImporter
      */
-    private function importer(MockHttpClient $client): ImageImporter
+    private function importer(MockHttpClient $client, array $parameters = [], string $relative = 'media/images'): ImageImporter
     {
-        $root  = $this->root;
-        $paths = new class($root) extends PathsHelper {
+        $paths = new class($this->root, $relative) extends PathsHelper {
             /**
              * Build the stub.
              *
-             * @param string $root Folder that stands in for Mautic's root
+             * @param string $root     Folder that stands in for Mautic's root
+             * @param string $relative Images path relative to the root
              */
-            public function __construct(private string $root)
+            public function __construct(private string $root, private string $relative)
             {
             }
 
@@ -200,10 +573,10 @@ final class ImageImporterTest extends TestCase
              */
             public function getSystemPath($name, $fullPath = false): string
             {
-                return $fullPath ? $this->root.'/media/images' : 'media/images';
+                return $fullPath ? $this->root.'/media/images' : $this->relative;
             }
         };
 
-        return new ImageImporter($client, $paths, SettingsStub::create());
+        return new ImageImporter($client, $paths, SettingsStub::create($parameters));
     }
 }

@@ -72,9 +72,55 @@ final class UnsubscribeLinkCheckerTest extends TestCase
         yield 'text token in an attribute' => ['<body><a href="{unsubscribe_text}">x</a></body>', 'inside a longer address or inside an attribute'];
         yield 'only in a comment' => ['<body><!-- <a href="{unsubscribe_url}">x</a> --></body>', 'only inside HTML comments'];
         yield 'url encoded' => ['<body><a href="{unsubscribe_url}">x</a><a href="%7Bunsubscribe_url%7D">y</a></body>', 'URL-encoded'];
+        yield 'upper case hex entity' => ['<body><a href="{unsubscribe_url}">x</a><p>&#X7B;unsubscribe_text&#X7D;</p></body>', 'HTML entities'];
         yield 'html entities' => ['<body><a href="{unsubscribe_url}">x</a><a href="&#123;unsubscribe_url&#125;">y</a></body>', 'HTML entities'];
         yield 'upper case' => ['<body><a href="{Unsubscribe_URL}">x</a></body>', 'not all in lower case'];
         yield 'pasted address' => ['<body><a href="{unsubscribe_url}">x</a><a href="https://m.example.com/email/unsubscribe/abc">y</a></body>', 'pasted unsubscribe address'];
+    }
+
+    /**
+     * The link is found whatever the case of the attribute name, the quotes or the spaces around the token.
+     *
+     * @param string $link Link as written
+     *
+     * @return void
+     */
+    #[DataProvider('linkSpellings')]
+    public function testLinkSpellingsPass(string $link): void
+    {
+        self::assertSame([], $this->checker()->check('<body>'.$link.'</body>'));
+    }
+
+    /**
+     * Links Mautic accepts, written in different ways.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function linkSpellings(): iterable
+    {
+        yield 'upper case attribute' => ['<a HREF="{unsubscribe_url}">x</a>'];
+        yield 'single quotes' => ["<a href='{unsubscribe_url}'>x</a>"];
+        yield 'no quotes' => ['<a href={unsubscribe_url}>x</a>'];
+        yield 'spaces around' => ['<a href=" {unsubscribe_url} ">x</a>'];
+    }
+
+    /**
+     * Every problem is reported once, with its exact wording.
+     *
+     * @return void
+     */
+    public function testProblemsAreReportedOnceWithTheirWording(): void
+    {
+        $html = '<body><a href="{unsubscribe_url}">x</a><p>{UNSUBSCRIBE_TEXT} {Unsubscribe_Url}</p>'
+            .'<a href="%7bunsubscribe_url%7d">y</a>'
+            .'<a href="https://m.example.com/email/unsubscribe/abc">z</a><a href="https://m.example.com/email/dnc/abc">w</a></body>';
+
+        self::assertSame([
+            'An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking.',
+            'An unsubscribe token is URL-encoded (%7B...%7D), and Mautic never replaces it.',
+            'A pasted unsubscribe address (/email/unsubscribe/) is in the HTML. It only works for one contact.',
+            'A pasted unsubscribe address (/email/dnc/) is in the HTML. It only works for one contact.',
+        ], $this->checker()->check($html));
     }
 
     /**
