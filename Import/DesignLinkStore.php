@@ -152,39 +152,55 @@ class DesignLinkStore
                 return $this->tryClaim($designId, $hash, $now, $claimSeconds);
             }
 
-            $emailId = $this->existingEmailId($row['email_id']);
-
-            if (null !== $emailId && $hash === $row['payload_hash']) {
-                if (null !== $row['pending_hash'] && $hash !== $row['pending_hash']) {
-                    $connection->executeStatement(
-                        'UPDATE '.$this->table().' SET pending_hash = NULL, claimed_at = NULL WHERE design_id = ?',
-                        [$designId]
-                    );
-                }
-                $connection->commit();
-
-                return new Claim(Claim::UNCHANGED, $emailId);
-            }
-
-            if ($hash === $row['pending_hash'] && $this->isFresh($row['claimed_at'], $now, $claimSeconds)) {
-                $connection->commit();
-
-                return new Claim(Claim::IN_PROGRESS, $emailId);
-            }
-
-            $connection->executeStatement(
-                'UPDATE '.$this->table().' SET pending_hash = ?, claimed_at = ?, date_modified = ? WHERE design_id = ?',
-                [$hash, $this->date($now), $this->date($now), $designId]
-            );
+            $claim = $this->claimRow($row, $designId, $hash, $now, $claimSeconds);
             $connection->commit();
 
-            return new Claim(Claim::CLAIMED, $emailId);
+            return $claim;
         } catch (\Throwable $exception) {
             if ($connection->isTransactionActive()) {
                 $connection->rollBack();
             }
             throw $exception;
         }
+    }
+
+    /**
+     * Claim the existing row of a design, already locked by the caller.
+     *
+     * @param array<string, mixed> $row          Row with email_id, payload_hash, pending_hash and claimed_at
+     * @param string               $designId     Design id
+     * @param string               $hash         Hash of this export
+     * @param \DateTimeImmutable   $now          Current time
+     * @param int                  $claimSeconds Seconds after which an unfinished claim is ignored
+     *
+     * @return Claim
+     */
+    private function claimRow(array $row, string $designId, string $hash, \DateTimeImmutable $now, int $claimSeconds): Claim
+    {
+        $connection = $this->connection();
+        $emailId    = $this->existingEmailId($row['email_id']);
+
+        if (null !== $emailId && $hash === $row['payload_hash']) {
+            if (null !== $row['pending_hash'] && $hash !== $row['pending_hash']) {
+                $connection->executeStatement(
+                    'UPDATE '.$this->table().' SET pending_hash = NULL, claimed_at = NULL WHERE design_id = ?',
+                    [$designId]
+                );
+            }
+
+            return new Claim(Claim::UNCHANGED, $emailId);
+        }
+
+        if ($hash === $row['pending_hash'] && $this->isFresh($row['claimed_at'], $now, $claimSeconds)) {
+            return new Claim(Claim::IN_PROGRESS, $emailId);
+        }
+
+        $connection->executeStatement(
+            'UPDATE '.$this->table().' SET pending_hash = ?, claimed_at = ?, date_modified = ? WHERE design_id = ?',
+            [$hash, $this->date($now), $this->date($now), $designId]
+        );
+
+        return new Claim(Claim::CLAIMED, $emailId);
     }
 
     /**

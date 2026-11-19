@@ -57,39 +57,7 @@ final class WebhookController
         }
 
         try {
-            if ('' === trim($body)) {
-                $this->importer->checkConfiguration();
-                $this->logger->info('RGE Studio connector: connection test answered.');
-
-                return new JsonResponse(['ok' => true]);
-            }
-
-            $export = $this->parser->parse($body);
-
-            if (!$export->isEmail()) {
-                $this->logger->info('RGE Studio connector: export ignored, not an email.', ['designId' => $export->designId, 'type' => $export->templateType]);
-
-                return new JsonResponse(['result' => 'ignored', 'reason' => 'not an email']);
-            }
-
-            $accepted = $this->settings->acceptedStatuses();
-            if ([] !== $accepted && !in_array($export->status, $accepted, true)) {
-                $this->logger->info('RGE Studio connector: export ignored, status not accepted.', ['designId' => $export->designId, 'status' => $export->status]);
-
-                return new JsonResponse(['result' => 'ignored', 'reason' => 'status not accepted']);
-            }
-
-            $result = $this->importer->import($export, $startedAt);
-            $this->logger->info('RGE Studio connector: export imported.', [
-                'designId' => $export->designId,
-                'bytes'    => strlen($body),
-                'result'   => $result->state,
-                'emailId'  => $result->emailId,
-                'problems' => $result->problems,
-                'seconds'  => round(microtime(true) - $startedAt, 2),
-            ]);
-
-            return new JsonResponse($result->toArray());
+            return $this->handle($body, $startedAt);
         } catch (InvalidExportException $exception) {
             $this->logger->warning('RGE Studio connector: unreadable export rejected.', ['reason' => $exception->getMessage(), 'bytes' => strlen($body)]);
 
@@ -107,5 +75,50 @@ final class WebhookController
 
             return new JsonResponse(['error' => 'The import failed.'], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * Answer a body within the size limit: the connection test, an ignored export or an import.
+     *
+     * @param string $body      Request body
+     * @param float  $startedAt Unix time with microseconds when the request arrived
+     *
+     * @return JsonResponse
+     */
+    private function handle(string $body, float $startedAt): JsonResponse
+    {
+        if ('' === trim($body)) {
+            $this->importer->checkConfiguration();
+            $this->logger->info('RGE Studio connector: connection test answered.');
+
+            return new JsonResponse(['ok' => true]);
+        }
+
+        $export = $this->parser->parse($body);
+
+        if (!$export->isEmail()) {
+            $this->logger->info('RGE Studio connector: export ignored, not an email.', ['designId' => $export->designId, 'type' => $export->templateType]);
+
+            return new JsonResponse(['result' => 'ignored', 'reason' => 'not an email']);
+        }
+
+        $accepted = $this->settings->acceptedStatuses();
+        if ([] !== $accepted && !in_array($export->status, $accepted, true)) {
+            $this->logger->info('RGE Studio connector: export ignored, status not accepted.', ['designId' => $export->designId, 'status' => $export->status]);
+
+            return new JsonResponse(['result' => 'ignored', 'reason' => 'status not accepted']);
+        }
+
+        $result = $this->importer->import($export, $startedAt);
+        $this->logger->info('RGE Studio connector: export imported.', [
+            'designId' => $export->designId,
+            'bytes'    => strlen($body),
+            'result'   => $result->state,
+            'emailId'  => $result->emailId,
+            'problems' => $result->problems,
+            'seconds'  => round(microtime(true) - $startedAt, 2),
+        ]);
+
+        return new JsonResponse($result->toArray());
     }
 }

@@ -23,6 +23,7 @@ return function (ContainerConfigurator $configurator): void {
         'Payload/InvalidExportException.php',
         'Import/Claim.php',
         'Import/ConnectorConfigurationException.php',
+        'Import/ImageDownloadBatch.php',
         'Import/ImageImportResult.php',
         'Import/ImportBusyException.php',
         'Import/ImportResult.php',

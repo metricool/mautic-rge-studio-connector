@@ -44,6 +44,18 @@ class UnsubscribeLinkChecker
      */
     public function check(string $html): array
     {
+        return array_merge($this->linkProblems($html), $this->tokenProblems($html), $this->pastedProblems($html));
+    }
+
+    /**
+     * Problems with where the unsubscribe link sits and whether Mautic adds its header.
+     *
+     * @param string $html Email HTML as it will be stored
+     *
+     * @return list<string>
+     */
+    private function linkProblems(string $html): array
+    {
         $problems = [];
         $visible  = (string) preg_replace('/<!--.*?-->/s', '', $html);
         $outside  = $this->scan($visible);
@@ -63,6 +75,20 @@ class UnsubscribeLinkChecker
             $problems[] = 'Mautic will send no List-Unsubscribe header. Use {unsubscribe_url} in lower case, or an unsubscribe text setting that holds |URL|.';
         }
 
+        return $problems;
+    }
+
+    /**
+     * Problems with how the unsubscribe tokens are written.
+     *
+     * @param string $html Email HTML as it will be stored
+     *
+     * @return list<string>
+     */
+    private function tokenProblems(string $html): array
+    {
+        $problems = [];
+
         preg_match_all('/\{unsubscribe_(?:url|text)\}/i', $html, $tokens);
         foreach ($tokens[0] as $token) {
             if ($token !== strtolower($token)) {
@@ -79,6 +105,19 @@ class UnsubscribeLinkChecker
             $problems[] = 'An unsubscribe token is written with HTML entities, and Mautic never replaces it.';
         }
 
+        return $problems;
+    }
+
+    /**
+     * Unsubscribe addresses pasted from a real email, which only work for one contact.
+     *
+     * @param string $html Email HTML as it will be stored
+     *
+     * @return list<string>
+     */
+    private function pastedProblems(string $html): array
+    {
+        $problems = [];
         foreach ($this->settings->pastedUnsubscribePaths() as $path) {
             if (false !== stripos($html, $path)) {
                 $problems[] = 'A pasted unsubscribe address ('.$path.') is in the HTML. It only works for one contact.';
@@ -100,35 +139,60 @@ class UnsubscribeLinkChecker
      */
     private function scan(string $html): array
     {
-        $working = false;
-        $broken  = false;
+        $found = ['working' => false, 'broken' => false];
 
         preg_match_all('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>/s', $html, $tags);
         foreach ($tags[0] as $tag) {
-            preg_match_all('/([^\s=\/>]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/s', $tag, $attributes, PREG_SET_ORDER);
-            foreach ($attributes as $attribute) {
-                $name  = strtolower($attribute[1]);
-                $value = ($attribute[2] ?? '').($attribute[3] ?? '').($attribute[4] ?? '');
-
-                if (str_contains($value, self::URL_TOKEN)) {
-                    if ('href' === $name && self::URL_TOKEN === trim($value)) {
-                        $working = true;
-                    } else {
-                        $broken = true;
-                    }
-                }
-
-                if (str_contains($value, self::TEXT_TOKEN)) {
-                    $broken = true;
-                }
-            }
+            $found = $this->scanTag($tag, $found);
         }
 
         $text = (string) preg_replace('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>|<[\/!][^>]*>/s', ' ', $html);
         if (str_contains($text, self::TEXT_TOKEN)) {
-            $working = true;
+            $found['working'] = true;
         }
 
-        return ['working' => $working, 'broken' => $broken];
+        return $found;
+    }
+
+    /**
+     * Add the working and broken tokens found in one tag's attributes.
+     *
+     * @param string                             $tag   Opening tag
+     * @param array{working: bool, broken: bool} $found What was found so far
+     *
+     * @return array{working: bool, broken: bool}
+     */
+    private function scanTag(string $tag, array $found): array
+    {
+        preg_match_all('/([^\s=\/>]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/s', $tag, $attributes, PREG_SET_ORDER);
+        foreach ($attributes as $attribute) {
+            $value = $this->attributeValue($attribute);
+
+            if (str_contains($value, self::URL_TOKEN)) {
+                if ('href' === strtolower($attribute[1]) && self::URL_TOKEN === trim($value)) {
+                    $found['working'] = true;
+                } else {
+                    $found['broken'] = true;
+                }
+            }
+
+            if (str_contains($value, self::TEXT_TOKEN)) {
+                $found['broken'] = true;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * Value of a matched attribute, whatever quotes it used.
+     *
+     * @param array<int, string> $attribute Attribute match: name, then the double-quoted, single-quoted or bare value
+     *
+     * @return string
+     */
+    private function attributeValue(array $attribute): string
+    {
+        return ($attribute[2] ?? '').($attribute[3] ?? '').($attribute[4] ?? '');
     }
 }

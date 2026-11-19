@@ -8,7 +8,6 @@ use Mautic\CoreBundle\Helper\PathsHelper;
 use MauticPlugin\RgeStudioConnectorBundle\Settings\ConnectorSettings;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Symfony\Contracts\HttpClient\ResponseInterface;
 
 class ImageImporter
 {
@@ -41,22 +40,10 @@ class ImageImporter
     {
         $references = $this->references($html);
         $urls       = array_values(array_unique(array_values($references)));
-        $outcomes   = [];
+        $outcomes   = $this->copyAll(array_slice($urls, 0, $this->settings->maxImages()), $deadline);
 
         foreach (array_slice($urls, $this->settings->maxImages()) as $url) {
             $outcomes[$url] = ['error' => 'Too many images in one export.'];
-        }
-
-        $pending = array_slice($urls, 0, $this->settings->maxImages());
-        for ($attempt = 1; [] !== $pending && $attempt <= $this->settings->imageAttempts(); ++$attempt) {
-            $retry = [];
-            foreach ($this->download($pending, $deadline) as $url => $outcome) {
-                $outcomes[$url] = $outcome;
-                if (isset($outcome['retry']) && true === $outcome['retry']) {
-                    $retry[] = $url;
-                }
-            }
-            $pending = microtime(true) < $deadline ? $retry : [];
         }
 
         uksort($references, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
@@ -66,26 +53,19 @@ class ImageImporter
         $search   = [];
         $replace  = [];
         foreach ($references as $raw => $url) {
-            $outcome  = $outcomes[$url] ?? ['error' => 'Not copied in time.'];
-            $search[] = $raw;
+            $outcome   = $outcomes[$url] ?? ['error' => 'Not copied in time.'];
+            $search[]  = $raw;
+            $replace[] = $outcome['url'] ?? '';
             if (isset($outcome['url'])) {
-                $replace[]    = $outcome['url'];
                 $copied[$url] = true;
             } else {
-                $replace[]      = '';
                 $failures[$url] = ['url' => $url, 'reason' => $outcome['error'] ?? 'Not copied.'];
             }
         }
 
         $html = str_replace($search, $replace, $html);
 
-        foreach ($this->settings->designerHosts() as $host) {
-            if (false !== stripos($html, $host)) {
-                $failures['host:'.$host] = ['url' => $host, 'reason' => 'An address on the designer\'s storage is still in the HTML.'];
-            }
-        }
-
-        return new ImageImportResult($html, count($copied), array_values($failures));
+        return new ImageImportResult($html, count($copied), array_values(array_merge($failures, $this->leftovers($html))));
     }
 
     /**
@@ -102,33 +82,12 @@ class ImageImporter
      */
     public function references(string $html): array
     {
-        $found = [];
-
-        preg_match_all('/\b(?:src|background|poster)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))/i', $html, $matches, PREG_SET_ORDER);
-        foreach ($matches as $match) {
-            $found[] = ($match[1] ?? '').($match[2] ?? '').($match[3] ?? '');
-        }
-
-        preg_match_all('/\bsrcset\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $html, $matches, PREG_SET_ORDER);
-        foreach ($matches as $match) {
-            preg_match_all('/[\s,]*([^\s,](?:\S*[^\s,])?)(?:,+|\s+[^,]*)?/', ($match[1] ?? '').($match[2] ?? ''), $candidates);
-            foreach ($candidates[1] as $candidate) {
-                $found[] = $candidate;
-            }
-        }
-
-        $css = (string) preg_replace(['/@import[^;]*;/i', '/@font-face\s*\{[^}]*\}/i'], '', $html);
-        preg_match_all('/url\(\s*((?:&quot;|&apos;|&#0*(?:34|39);|&#x0*(?:22|27);|["\'])?)([^"\')]+?)\1\s*\)/i', $css, $matches, PREG_SET_ORDER);
-        foreach ($matches as $match) {
-            $found[] = $match[2];
-        }
-
-        foreach ($this->settings->designerHosts() as $host) {
-            preg_match_all('#(?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#][^\s"\'<>()]*)?#i', $html, $matches);
-            foreach ($matches[0] as $address) {
-                $found[] = $address;
-            }
-        }
+        $found = array_merge(
+            $this->attributeAddresses($html),
+            $this->srcsetAddresses($html),
+            $this->cssAddresses($html),
+            $this->designerAddresses($html),
+        );
 
         $references = [];
         foreach ($found as $raw) {
@@ -140,6 +99,118 @@ class ImageImporter
         }
 
         return $references;
+    }
+
+    /**
+     * Addresses in src, background and poster attributes, quoted or not.
+     *
+     * @param string $html Email HTML
+     *
+     * @return list<string>
+     */
+    private function attributeAddresses(string $html): array
+    {
+        preg_match_all('/\b(?:src|background|poster)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))/i', $html, $matches, PREG_SET_ORDER);
+
+        return array_map(static fn (array $match): string => ($match[1] ?? '').($match[2] ?? '').($match[3] ?? ''), $matches);
+    }
+
+    /**
+     * Addresses in srcset lists, read the way browsers split them.
+     *
+     * @param string $html Email HTML
+     *
+     * @return list<string>
+     */
+    private function srcsetAddresses(string $html): array
+    {
+        preg_match_all('/\bsrcset\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $html, $matches, PREG_SET_ORDER);
+
+        $found = [];
+        foreach ($matches as $match) {
+            preg_match_all('/[\s,]*([^\s,](?:\S*[^\s,])?)(?:,+|\s+[^,]*)?/', ($match[1] ?? '').($match[2] ?? ''), $candidates);
+            array_push($found, ...$candidates[1]);
+        }
+
+        return $found;
+    }
+
+    /**
+     * Addresses in CSS url() values, outside @import rules and @font-face blocks.
+     *
+     * @param string $html Email HTML
+     *
+     * @return list<string>
+     */
+    private function cssAddresses(string $html): array
+    {
+        $css = (string) preg_replace(['/@import[^;]*;/i', '/@font-face\s*\{[^}]*\}/i'], '', $html);
+        preg_match_all('/url\(\s*((?:&quot;|&apos;|&#0*(?:34|39);|&#x0*(?:22|27);|["\'])?)([^"\')]+?)\1\s*\)/i', $css, $matches);
+
+        return $matches[2];
+    }
+
+    /**
+     * Every address on the designer's image storage, wherever it appears.
+     *
+     * @param string $html Email HTML
+     *
+     * @return list<string>
+     */
+    private function designerAddresses(string $html): array
+    {
+        $found = [];
+        foreach ($this->settings->designerHosts() as $host) {
+            preg_match_all('#(?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#][^\s"\'<>()]*)?#i', $html, $matches);
+            array_push($found, ...$matches[0]);
+        }
+
+        return $found;
+    }
+
+    /**
+     * Download every address, trying again the ones that may succeed later, within the deadline.
+     *
+     * @param list<string> $urls     Addresses to download
+     * @param float        $deadline Unix time with microseconds when copying must stop
+     *
+     * @return array<string, array{url?: string, error?: string, retry?: bool}>
+     */
+    private function copyAll(array $urls, float $deadline): array
+    {
+        $outcomes = [];
+        $pending  = $urls;
+        for ($attempt = 1; [] !== $pending && $attempt <= $this->settings->imageAttempts(); ++$attempt) {
+            $retry = [];
+            foreach ($this->download($pending, $deadline) as $url => $outcome) {
+                $outcomes[$url] = $outcome;
+                if ($outcome['retry'] ?? false) {
+                    $retry[] = $url;
+                }
+            }
+            $pending = microtime(true) < $deadline ? $retry : [];
+        }
+
+        return $outcomes;
+    }
+
+    /**
+     * Designer storage addresses still in the HTML after the copies, as failures.
+     *
+     * @param string $html Email HTML with the copies in place
+     *
+     * @return array<string, array{url: string, reason: string}>
+     */
+    private function leftovers(string $html): array
+    {
+        $failures = [];
+        foreach ($this->settings->designerHosts() as $host) {
+            if (false !== stripos($html, $host)) {
+                $failures['host:'.$host] = ['url' => $host, 'reason' => 'An address on the designer\'s storage is still in the HTML.'];
+            }
+        }
+
+        return $failures;
     }
 
     /**
@@ -180,125 +251,57 @@ class ImageImporter
     private function download(array $urls, float $deadline): array
     {
         $directory = $this->directory();
-        $outcomes  = [];
-        $active    = [];
-        $files     = [];
-        $sizes     = [];
-
+        $batch     = new ImageDownloadBatch($directory, $this->settings->maxImageBytes());
         foreach ($urls as $url) {
-            $remaining = $deadline - microtime(true);
-            if ($remaining < 0.5) {
-                $outcomes[$url] = ['error' => 'Not copied in time.'];
-                continue;
-            }
-
-            try {
-                $active[$url] = $this->httpClient->request('GET', $url, [
-                    'timeout'       => min(10.0, $remaining),
-                    'max_duration'  => $remaining,
-                    'max_redirects' => 3,
-                    'headers'       => ['Accept' => 'image/*'],
-                    'user_data'     => $url,
-                ]);
-            } catch (ExceptionInterface) {
-                $outcomes[$url] = ['error' => 'The download could not start.', 'retry' => true];
-            }
+            $this->start($batch, $url, $deadline);
         }
 
-        while ([] !== $active && microtime(true) < $deadline) {
+        while ($batch->isRunning() && microtime(true) < $deadline) {
             $idle = max(0.1, min(1.0, $deadline - microtime(true)));
-            foreach ($this->httpClient->stream(array_values($active), $idle) as $response => $chunk) {
-                $url = $this->urlOf($response);
-                if (!isset($active[$url])) {
-                    continue;
-                }
-
-                try {
-                    if ($chunk->isTimeout()) {
-                        if (microtime(true) >= $deadline) {
-                            break;
-                        }
-                        continue;
-                    }
-
-                    if ($chunk->isFirst()) {
-                        $status = $response->getStatusCode();
-                        if (200 !== $status) {
-                            $outcomes[$url] = ['error' => 'The image server answered '.$status.'.', 'retry' => $status >= 500 || 429 === $status];
-                            $this->stop($response, $active, $files, $url);
-                            continue;
-                        }
-
-                        $length = $response->getHeaders(false)['content-length'][0] ?? null;
-                        if (null !== $length && (int) $length > $this->settings->maxImageBytes()) {
-                            $outcomes[$url] = ['error' => 'The image is larger than the limit.'];
-                            $this->stop($response, $active, $files, $url);
-                            continue;
-                        }
-
-                        $path = tempnam($directory, '.rge');
-                        $file = false === $path ? false : fopen($path, 'wb');
-                        if (false === $path || false === $file) {
-                            $outcomes[$url] = ['error' => 'The image folder is not writable.'];
-                            $this->stop($response, $active, $files, $url);
-                            continue;
-                        }
-                        $files[$url] = ['path' => $path, 'handle' => $file];
-                        $sizes[$url] = 0;
-                    }
-
-                    $content = $chunk->getContent();
-                    if ('' !== $content && isset($files[$url])) {
-                        $sizes[$url] += strlen($content);
-                        if ($sizes[$url] > $this->settings->maxImageBytes()) {
-                            $outcomes[$url] = ['error' => 'The image is larger than the limit.'];
-                            $this->stop($response, $active, $files, $url);
-                            continue;
-                        }
-                        fwrite($files[$url]['handle'], $content);
-                    }
-
-                    if ($chunk->isLast() && isset($files[$url])) {
-                        fclose($files[$url]['handle']);
-                        $outcomes[$url] = $this->store($files[$url]['path'], $directory);
-                        unset($files[$url], $active[$url]);
-                    }
-                } catch (ExceptionInterface) {
-                    $outcomes[$url] = ['error' => 'The download failed.', 'retry' => true];
-                    $this->stop($response, $active, $files, $url);
+            foreach ($this->httpClient->stream($batch->responses(), $idle) as $response => $chunk) {
+                if ($batch->receive($response, $chunk, $deadline)) {
+                    break;
                 }
             }
         }
+        $batch->cancelRemaining();
 
-        foreach (array_keys($active) as $url) {
-            $outcomes[$url] = ['error' => 'Not copied in time.'];
-            $this->stop($active[$url], $active, $files, $url);
+        $outcomes = [];
+        foreach ($batch->outcomes() as $url => $outcome) {
+            $outcomes[$url] = isset($outcome['path']) ? $this->store($outcome['path'], $directory) : $outcome;
         }
 
         return $outcomes;
     }
 
     /**
-     * Cancel a download and drop its temporary file.
+     * Start one download, or record why it cannot start.
      *
-     * @param ResponseInterface                                    $response Download to cancel
-     * @param array<string, ResponseInterface>                     $active   Downloads still running
-     * @param array<string, array{path: string, handle: resource}> $files    Temporary files
-     * @param string                                               $url      Address of the download
+     * @param ImageDownloadBatch $batch    Batch the download belongs to
+     * @param string             $url      Address of the image
+     * @param float              $deadline Unix time with microseconds when downloads must stop
      *
      * @return void
      */
-    private function stop(ResponseInterface $response, array &$active, array &$files, string $url): void
+    private function start(ImageDownloadBatch $batch, string $url, float $deadline): void
     {
-        $response->cancel();
-        unset($active[$url]);
+        $remaining = $deadline - microtime(true);
+        if ($remaining < 0.5) {
+            $batch->fail($url, 'Not copied in time.');
 
-        if (isset($files[$url])) {
-            if (is_resource($files[$url]['handle'])) {
-                fclose($files[$url]['handle']);
-            }
-            @unlink($files[$url]['path']);
-            unset($files[$url]);
+            return;
+        }
+
+        try {
+            $batch->add($url, $this->httpClient->request('GET', $url, [
+                'timeout'       => min(10.0, $remaining),
+                'max_duration'  => $remaining,
+                'max_redirects' => 3,
+                'headers'       => ['Accept' => 'image/*'],
+                'user_data'     => $url,
+            ]));
+        } catch (ExceptionInterface) {
+            $batch->fail($url, 'The download could not start.', true);
         }
     }
 
@@ -396,19 +399,5 @@ class ImageImporter
         $relative = trim((string) $this->paths->getSystemPath('images', false), '/');
 
         return $base.'/'.$relative.'/'.$this->settings->imageFolder().'/'.$name;
-    }
-
-    /**
-     * Address a download was started for.
-     *
-     * @param ResponseInterface $response Download
-     *
-     * @return string
-     */
-    private function urlOf(ResponseInterface $response): string
-    {
-        $url = $response->getInfo('user_data');
-
-        return is_string($url) ? $url : '';
     }
 }

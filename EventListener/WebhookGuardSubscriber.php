@@ -9,6 +9,7 @@ use MauticPlugin\RgeStudioConnectorBundle\Settings\ConnectorSettings;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
@@ -55,7 +56,7 @@ final class WebhookGuardSubscriber implements EventSubscriberInterface
 
         $length = $request->headers->get('Content-Length');
         if (null !== $length && (int) $length > $this->settings->maxBodyBytes()) {
-            $event->setResponse(new JsonResponse(['error' => 'The export is larger than the limit.'], Response::HTTP_REQUEST_ENTITY_TOO_LARGE));
+            $event->setResponse($this->tooLarge());
 
             return;
         }
@@ -68,19 +69,50 @@ final class WebhookGuardSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $given = (string) $request->headers->get($this->settings->secretHeader(), '');
-        foreach ($secrets as $secret) {
-            if ('' !== $given && hash_equals($secret, $given)) {
-                if (strlen($request->getContent()) > $this->settings->maxBodyBytes()) {
-                    $event->setResponse(new JsonResponse(['error' => 'The export is larger than the limit.'], Response::HTTP_REQUEST_ENTITY_TOO_LARGE));
-                }
+        if (!$this->carriesSecret($request, $secrets)) {
+            $this->logger->warning('RGE Studio connector: call rejected, wrong or missing shared secret.', ['ip' => $request->getClientIp()]);
+            $event->setResponse($this->unauthorised());
 
-                return;
+            return;
+        }
+
+        if (strlen($request->getContent()) > $this->settings->maxBodyBytes()) {
+            $event->setResponse($this->tooLarge());
+        }
+    }
+
+    /**
+     * Whether the call carries one of the accepted secrets.
+     *
+     * @param Request      $request Incoming request
+     * @param list<string> $secrets Accepted secrets
+     *
+     * @return bool
+     */
+    private function carriesSecret(Request $request, array $secrets): bool
+    {
+        $given = (string) $request->headers->get($this->settings->secretHeader(), '');
+        if ('' === $given) {
+            return false;
+        }
+
+        foreach ($secrets as $secret) {
+            if (hash_equals($secret, $given)) {
+                return true;
             }
         }
 
-        $this->logger->warning('RGE Studio connector: call rejected, wrong or missing shared secret.', ['ip' => $request->getClientIp()]);
-        $event->setResponse($this->unauthorised());
+        return false;
+    }
+
+    /**
+     * Answer for a body over the size limit.
+     *
+     * @return JsonResponse
+     */
+    private function tooLarge(): JsonResponse
+    {
+        return new JsonResponse(['error' => 'The export is larger than the limit.'], Response::HTTP_REQUEST_ENTITY_TOO_LARGE);
     }
 
     /**

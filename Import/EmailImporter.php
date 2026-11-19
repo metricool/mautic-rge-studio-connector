@@ -116,49 +116,79 @@ class EmailImporter
 
             $connection->beginTransaction();
             $lock = $this->store->lockForCompletion($export->designId, $export->hash);
-            if (!$lock['owned']) {
-                $connection->commit();
-
-                return new ImportResult(ImportResult::SUPERSEDED, $lock['emailId']);
-            }
-
-            $email = $this->changeableEmail($lock['emailId']);
-            $state = null === $email ? ImportResult::CREATED : ImportResult::UPDATED;
-            if (null === $email) {
-                $email = $this->newEmail($wanted, $project);
-            } else {
-                $this->applyType($email, $wanted, $problems);
-                $email->markForVersionIncrement();
-                $email->setDateModified(new \DateTime());
-            }
-
-            $email->setTemplate('mautic_code_mode');
-            $email->setCustomHtml($images->html);
-            $email->setPreheaderText(null);
-            $email->setIsPublished(false);
-            $this->checkLinks($email, $problems);
-
-            if ('' === $export->subject) {
-                $problems[ConnectorSettings::MARKER_OTHER][] = 'The design has no subject.';
-            }
-            $email->setSubject('' === $export->subject ? null : mb_substr($export->subject, 0, self::SUBJECT_LIMIT));
-            $email->setName($this->name($export, $problems));
-            $email->setDescription($this->description($export, $problems));
-
-            $this->saveAs($user, fn () => $this->emailModel->saveEntity($email, false));
-            $this->store->complete($export->designId, $export->hash, (int) $email->getId(), $this->now());
+            $result = $lock['owned']
+                ? $this->save($export, $images->html, $problems, $wanted, $lock['emailId'], $project, $user)
+                : new ImportResult(ImportResult::SUPERSEDED, $lock['emailId']);
             $connection->commit();
 
-            return new ImportResult($state, $email->getId(), $this->count($problems));
+            return $result;
         } catch (\Throwable $exception) {
-            if ($connection->isTransactionActive()) {
-                $connection->rollBack();
-            }
-            try {
-                $this->store->release($export->designId, $export->hash);
-            } catch (\Throwable) {
-            }
+            $this->abandon($export);
             throw $exception;
+        }
+    }
+
+    /**
+     * Write the export into the linked email while it may still change, or into a new email.
+     *
+     * @param DesignExport                $export   Export to import
+     * @param string                      $html     HTML with the copied images
+     * @param array<string, list<string>> $problems Problems by marker kind
+     * @param string                      $wanted   Type the tags ask for
+     * @param int|null                    $linkedId Email linked to the design
+     * @param Project                     $project  Import project
+     * @param User                        $user     Import user
+     *
+     * @return ImportResult
+     */
+    private function save(DesignExport $export, string $html, array $problems, string $wanted, ?int $linkedId, Project $project, User $user): ImportResult
+    {
+        $email = $this->changeableEmail($linkedId);
+        $state = null === $email ? ImportResult::CREATED : ImportResult::UPDATED;
+        if (null === $email) {
+            $email = $this->newEmail($wanted, $project);
+        } else {
+            $this->applyType($email, $wanted, $problems);
+            $email->markForVersionIncrement();
+            $email->setDateModified(new \DateTime());
+        }
+
+        $email->setTemplate('mautic_code_mode');
+        $email->setCustomHtml($html);
+        $email->setPreheaderText(null);
+        $email->setIsPublished(false);
+        $this->checkLinks($email, $problems);
+
+        if ('' === $export->subject) {
+            $problems[ConnectorSettings::MARKER_OTHER][] = 'The design has no subject.';
+        }
+        $email->setSubject('' === $export->subject ? null : mb_substr($export->subject, 0, self::SUBJECT_LIMIT));
+        $email->setName($this->name($export, $problems));
+        $email->setDescription($this->description($export, $problems));
+
+        $this->saveAs($user, fn () => $this->emailModel->saveEntity($email, false));
+        $this->store->complete($export->designId, $export->hash, (int) $email->getId(), $this->now());
+
+        return new ImportResult($state, $email->getId(), $this->count($problems));
+    }
+
+    /**
+     * Undo a failed import: roll back its transaction and give up its claim on the design.
+     *
+     * @param DesignExport $export Export that failed
+     *
+     * @return void
+     */
+    private function abandon(DesignExport $export): void
+    {
+        $connection = $this->entityManager->getConnection();
+        if ($connection->isTransactionActive()) {
+            $connection->rollBack();
+        }
+
+        try {
+            $this->store->release($export->designId, $export->hash);
+        } catch (\Throwable) {
         }
     }
 
