@@ -7,12 +7,10 @@ namespace MauticPlugin\RgeStudioConnectorBundle\Import;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\EmailBundle\Entity\Email;
 use Mautic\EmailBundle\Model\EmailModel;
-use Mautic\EmailBundle\Validator\ValidEmailLinks;
 use Mautic\UserBundle\Entity\User;
 use Mautic\UserBundle\Model\UserModel;
 use MauticPlugin\RgeStudioConnectorBundle\Payload\DesignExport;
 use MauticPlugin\RgeStudioConnectorBundle\Settings\ConnectorSettings;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 class EmailImporter
 {
@@ -34,7 +32,7 @@ class EmailImporter
      * @param ImportProject          $project       Import project, where this Mautic has projects
      * @param UserModel              $userModel     Mautic user model
      * @param ActAsUser              $actAs         Runs a save as the import user
-     * @param ValidatorInterface     $validator     Symfony validator
+     * @param LinkChecker            $links         Link address check
      * @param EntityManagerInterface $entityManager Entity manager
      */
     public function __construct(
@@ -47,7 +45,7 @@ class EmailImporter
         private ImportProject $project,
         private UserModel $userModel,
         private ActAsUser $actAs,
-        private ValidatorInterface $validator,
+        private LinkChecker $links,
         private EntityManagerInterface $entityManager,
     ) {
     }
@@ -148,7 +146,7 @@ class EmailImporter
         $email->setCustomHtml($html);
         $email->setPreheaderText(null);
         $email->setIsPublished(false);
-        $this->checkLinks($email, $problems);
+        $this->checkLinks($html, $problems);
 
         if ('' === $export->subject) {
             $problems[ConnectorSettings::MARKER_OTHER][] = 'The design has no subject.';
@@ -317,17 +315,17 @@ class EmailImporter
     }
 
     /**
-     * Add Mautic's own link check to the problems.
+     * Add every link that is not a valid address to the problems.
      *
-     * @param Email                       $email    Email with its HTML set
+     * @param string                      $html     Email HTML as it will be stored
      * @param array<string, list<string>> $problems Problems by marker kind, added to
      *
      * @return void
      */
-    private function checkLinks(Email $email, array &$problems): void
+    private function checkLinks(string $html, array &$problems): void
     {
-        foreach ($this->validator->validate($email, new ValidEmailLinks()) as $violation) {
-            $problems[ConnectorSettings::MARKER_OTHER][] = 'Mautic rejects a link: '.$violation->getMessage();
+        foreach ($this->links->invalidLinks($html) as $url) {
+            $problems[ConnectorSettings::MARKER_OTHER][] = 'A link address is not valid: '.$url;
         }
     }
 

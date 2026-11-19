@@ -28,6 +28,7 @@ use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportBusyException;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportResult;
+use MauticPlugin\RgeStudioConnectorBundle\Import\LinkChecker;
 use MauticPlugin\RgeStudioConnectorBundle\Import\MauticImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\NoImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\UnsubscribeLinkChecker;
@@ -38,7 +39,6 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 final class EmailImporterTest extends MauticMysqlTestCase
 {
@@ -222,16 +222,16 @@ final class EmailImporterTest extends MauticMysqlTestCase
     }
 
     /**
-     * A link Mautic would reject is flagged.
+     * A link that is not a valid address is flagged.
      *
      * @return void
      */
-    public function testRejectedLinkIsFlagged(): void
+    public function testInvalidLinkIsFlagged(): void
     {
         $result = $this->importer()->import($this->export(['html' => self::WORKING.'<a href="javascript:alert(1)">x</a>']), microtime(true));
 
         self::assertSame(1, $result->problems);
-        self::assertStringEndsWith("\n[FIX EMAIL] Mautic rejects a link: The email contains an invalid URL: javascript:alert(1)", (string) $this->email($result)->getDescription());
+        self::assertStringEndsWith("\n[FIX EMAIL] A link address is not valid: javascript:alert(1)", (string) $this->email($result)->getDescription());
     }
 
     /**
@@ -531,7 +531,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
             $project,
             $container->get(UserModel::class),
             $actAs,
-            $container->get(ValidatorInterface::class),
+            new LinkChecker(),
             $this->em,
         );
     }

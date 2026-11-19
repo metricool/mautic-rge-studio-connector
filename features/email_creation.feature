@@ -100,12 +100,33 @@ Feature: An export becomes a Mautic email
     And the email name is "[FIX EMAIL] Spring offer"
     And the email description contains "[FIX EMAIL] The design has no subject."
 
-  Scenario: A link Mautic rejects is flagged and the email is still created
-    Given the design HTML holds the link "javascript:alert(1)"
+  Scenario Outline: A link that is not a valid address is flagged and the email is still created
+    Given the design HTML holds the link "<link>"
     When RGE Studio sends the design with the secret "current-secret"
     Then the webhook answers 200 with the result "created"
     And the email name starts with "[FIX EMAIL]"
-    And the email description contains "[FIX EMAIL] Mautic rejects a link:"
+    And the email description contains "[FIX EMAIL] A link address is not valid: <link>"
+
+    Examples:
+      | link                |
+      | javascript:alert(1) |
+      | www.example.com     |
+      | /spring             |
+
+  Scenario Outline: Tokens, anchors, web addresses and mail, phone or text links pass
+    Given the design HTML holds the link "<link>"
+    When RGE Studio sends the design with the secret "current-secret"
+    Then the webhook answers 200 with the result "created"
+    And the email name is "Spring offer"
+
+    Examples:
+      | link                     |
+      | {webview_url}            |
+      | #top                     |
+      | https://example.com/a    |
+      | mailto:hello@example.com |
+      | tel:+34600000000         |
+      | sms:+34600000000         |
 
   Scenario: The answer counts the problems found
     Given the design has no subject and no title
