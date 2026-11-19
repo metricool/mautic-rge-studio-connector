@@ -535,7 +535,7 @@ final class ImageImporterTest extends TestCase
     private function recording(\ArrayObject $requests, callable $answer): MockHttpClient
     {
         return new MockHttpClient(static function (string $method, string $url, array $options) use ($requests, $answer): MockResponse {
-            $requests[] = ['method' => $method, 'url' => $url, 'options' => $options];
+            $requests->append(['method' => $method, 'url' => $url, 'options' => $options]);
 
             return $answer($method, $url, $options, count($requests));
         });
