@@ -7,6 +7,7 @@ namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Functional;
 use Mautic\CoreBundle\Test\MauticMysqlTestCase;
 use Mautic\EmailBundle\Entity\Email;
 use Mautic\ProjectBundle\Entity\Project;
+use Mautic\ProjectBundle\Model\ProjectModel;
 use Mautic\UserBundle\Entity\User;
 use MauticPlugin\RgeStudioConnectorBundle\Entity\DesignLink;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -136,13 +137,30 @@ final class WebhookControllerTest extends MauticMysqlTestCase
         self::assertStringNotContainsString('media.beefree.cloud', (string) $email->getCustomHtml());
         self::assertStringContainsString('/media/images/rge-studio/'.hash('sha256', self::PNG).'.png', (string) $email->getCustomHtml());
         self::assertStringContainsString('Preheader: Twenty percent off', (string) $email->getDescription());
+        self::assertNotNull($email->getCreatedBy());
+    }
+
+    /**
+     * Where Mautic has projects, an export goes into the import project.
+     *
+     * @return void
+     */
+    public function testExportGoesIntoTheImportProject(): void
+    {
+        if (!class_exists(ProjectModel::class)) {
+            self::markTestSkipped('This Mautic has no projects.');
+        }
+
+        $this->post($this->body(), self::SECRET);
+
+        $email = $this->em->getRepository(Email::class)->find($this->answer()['emailId']);
+        self::assertInstanceOf(Email::class, $email);
         $projects = [];
         foreach ($email->getProjects() as $project) {
             self::assertInstanceOf(Project::class, $project);
             $projects[] = $project->getName();
         }
         self::assertSame(['RGE Studio'], $projects);
-        self::assertNotNull($email->getCreatedBy());
     }
 
     /**

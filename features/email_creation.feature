@@ -43,21 +43,34 @@ Feature: An export becomes a Mautic email
     Then the email name is 190 characters long
     And the email subject is 190 characters long
 
+  Scenario: The email has no category
+    When RGE Studio sends the design with the secret "current-secret"
+    Then the email has no category
+
+  @projects
   Scenario: The email goes into the import project
     When RGE Studio sends the design with the secret "current-secret"
     Then the email is in the project "RGE Studio"
-    And the email has no category
 
+  @projects
   Scenario: The import project is created when it does not exist yet
     Given no project is named "RGE Studio"
     When RGE Studio sends the design with the secret "current-secret"
     Then a project named "RGE Studio" exists
     And the email is in the project "RGE Studio"
 
+  @projects
   Scenario: The project name can be changed
     Given the project name is "Designs"
     When RGE Studio sends the design with the secret "current-secret"
     Then the email is in the project "Designs"
+
+  @no-projects
+  Scenario: Without projects in Mautic the email is created all the same
+    Given the project name is ""
+    When RGE Studio sends the design with the secret "current-secret"
+    Then the webhook answers 200 with the result "created"
+    And one email exists for design 1234567
 
   Scenario: The email is saved as the import user
     When RGE Studio sends the design with the secret "current-secret"

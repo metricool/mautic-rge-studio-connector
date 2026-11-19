@@ -29,10 +29,17 @@ Feature: The Custom Connector's connection test
     When RGE Studio tests the connection with the secret "current-secret"
     Then the webhook answers 503 with the error "The connector is not configured."
 
+  @projects
   Scenario: The connection test fails when the project name is empty
     Given the project name is ""
     When RGE Studio tests the connection with the secret "current-secret"
     Then the webhook answers 503 with the error "The connector is not configured."
+
+  @no-projects
+  Scenario: Without projects in Mautic the project name is not checked
+    Given the project name is ""
+    When RGE Studio tests the connection with the secret "current-secret"
+    Then the webhook answers 200
 
   Scenario: The connection test needs the secret too
     When RGE Studio tests the connection without a secret

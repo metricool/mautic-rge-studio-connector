@@ -4,20 +4,14 @@ declare(strict_types=1);
 
 namespace MauticPlugin\RgeStudioConnectorBundle\Import;
 
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\Persistence\ManagerRegistry;
 use Mautic\EmailBundle\Entity\Email;
 use Mautic\EmailBundle\Model\EmailModel;
 use Mautic\EmailBundle\Validator\ValidEmailLinks;
-use Mautic\ProjectBundle\Entity\Project;
-use Mautic\ProjectBundle\Model\ProjectModel;
 use Mautic\UserBundle\Entity\User;
 use Mautic\UserBundle\Model\UserModel;
-use Mautic\UserBundle\Security\DummyToken;
 use MauticPlugin\RgeStudioConnectorBundle\Payload\DesignExport;
 use MauticPlugin\RgeStudioConnectorBundle\Settings\ConnectorSettings;
-use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 class EmailImporter
@@ -27,7 +21,6 @@ class EmailImporter
 
     private const NAME_LIMIT    = 190;
     private const SUBJECT_LIMIT = 190;
-    private const PROJECT_LIMIT = 191;
 
     /**
      * Build the importer.
@@ -38,12 +31,11 @@ class EmailImporter
      * @param UnsubscribeLinkChecker $unsubscribe   Unsubscribe link checks
      * @param EmailUsage             $usage         Checks on how an email is used
      * @param EmailModel             $emailModel    Mautic email model
-     * @param ProjectModel           $projectModel  Mautic project model
+     * @param ImportProject          $project       Import project, where this Mautic has projects
      * @param UserModel              $userModel     Mautic user model
-     * @param TokenStorageInterface  $tokenStorage  Security token storage
+     * @param ActAsUser              $actAs         Runs a save as the import user
      * @param ValidatorInterface     $validator     Symfony validator
      * @param EntityManagerInterface $entityManager Entity manager
-     * @param ManagerRegistry        $registry      Doctrine registry, to reset a closed entity manager
      */
     public function __construct(
         private ConnectorSettings $settings,
@@ -52,17 +44,16 @@ class EmailImporter
         private UnsubscribeLinkChecker $unsubscribe,
         private EmailUsage $usage,
         private EmailModel $emailModel,
-        private ProjectModel $projectModel,
+        private ImportProject $project,
         private UserModel $userModel,
-        private TokenStorageInterface $tokenStorage,
+        private ActAsUser $actAs,
         private ValidatorInterface $validator,
         private EntityManagerInterface $entityManager,
-        private ManagerRegistry $registry,
     ) {
     }
 
     /**
-     * Check that the plugin can import: an import user and a valid project name.
+     * Check that the plugin can import: an import user and, where Mautic has projects, a valid project name.
      *
      * @return void
      *
@@ -71,7 +62,7 @@ class EmailImporter
     public function checkConfiguration(): void
     {
         $this->importUser();
-        $this->projectName();
+        $this->project->check();
     }
 
     /**
@@ -90,9 +81,8 @@ class EmailImporter
      */
     public function import(DesignExport $export, float $startedAt): ImportResult
     {
-        $this->importUser();
-        $project = $this->project();
-        $user    = $this->importUser();
+        $user      = $this->importUser();
+        $projectId = $this->project->prepare($user);
 
         $claim = $this->claim($export, $startedAt);
         if (!$claim->isClaimed()) {
@@ -117,7 +107,7 @@ class EmailImporter
             $connection->beginTransaction();
             $lock = $this->store->lockForCompletion($export->designId, $export->hash);
             $result = $lock['owned']
-                ? $this->save($export, $images->html, $problems, $wanted, $lock['emailId'], $project, $user)
+                ? $this->save($export, $images->html, $problems, $wanted, $lock['emailId'], $projectId, $user)
                 : new ImportResult(ImportResult::SUPERSEDED, $lock['emailId']);
             $connection->commit();
 
@@ -131,28 +121,29 @@ class EmailImporter
     /**
      * Write the export into the linked email while it may still change, or into a new email.
      *
-     * @param DesignExport                $export   Export to import
-     * @param string                      $html     HTML with the copied images
-     * @param array<string, list<string>> $problems Problems by marker kind
-     * @param string                      $wanted   Type the tags ask for
-     * @param int|null                    $linkedId Email linked to the design
-     * @param Project                     $project  Import project
-     * @param User                        $user     Import user
+     * @param DesignExport                $export    Export to import
+     * @param string                      $html      HTML with the copied images
+     * @param array<string, list<string>> $problems  Problems by marker kind
+     * @param string                      $wanted    Type the tags ask for
+     * @param int|null                    $linkedId  Email linked to the design
+     * @param int                         $projectId Import project, 0 when this Mautic has no projects
+     * @param User                        $user      Import user
      *
      * @return ImportResult
      */
-    private function save(DesignExport $export, string $html, array $problems, string $wanted, ?int $linkedId, Project $project, User $user): ImportResult
+    private function save(DesignExport $export, string $html, array $problems, string $wanted, ?int $linkedId, int $projectId, User $user): ImportResult
     {
         $email = $this->changeableEmail($linkedId);
         $state = null === $email ? ImportResult::CREATED : ImportResult::UPDATED;
         if (null === $email) {
-            $email = $this->newEmail($wanted, $project);
+            $email = $this->newEmail($wanted);
         } else {
             $this->applyType($email, $wanted, $problems);
             $email->markForVersionIncrement();
             $email->setDateModified(new \DateTime());
         }
 
+        $this->project->place($email, $projectId);
         $email->setTemplate('mautic_code_mode');
         $email->setCustomHtml($html);
         $email->setPreheaderText(null);
@@ -166,7 +157,7 @@ class EmailImporter
         $email->setName($this->name($export, $problems));
         $email->setDescription($this->description($export, $problems));
 
-        $this->saveAs($user, fn () => $this->emailModel->saveEntity($email, false));
+        $this->actAs->run($user, fn () => $this->emailModel->saveEntity($email, false));
         $this->store->complete($export->designId, $export->hash, (int) $email->getId(), $this->now());
 
         return new ImportResult($state, $email->getId(), $this->count($problems));
@@ -280,18 +271,16 @@ class EmailImporter
     }
 
     /**
-     * New unpublished code-mode email in the import project.
+     * New email of the given type.
      *
-     * @param string  $type    Email type
-     * @param Project $project Import project
+     * @param string $type Email type
      *
      * @return Email
      */
-    private function newEmail(string $type, Project $project): Email
+    private function newEmail(string $type): Email
     {
         $email = new Email();
         $email->setEmailType($type);
-        $email->addProject($project);
 
         return $email;
     }
@@ -401,56 +390,6 @@ class EmailImporter
     }
 
     /**
-     * Import project, created when missing.
-     *
-     * @return Project
-     *
-     * @throws ConnectorConfigurationException When the project name is invalid or the project cannot be created
-     */
-    private function project(): Project
-    {
-        $name    = $this->projectName();
-        $project = $this->projectModel->getRepository()->findOneBy(['name' => $name]);
-        if ($project instanceof Project) {
-            return $project;
-        }
-
-        $project = new Project();
-        $project->setName($name);
-
-        try {
-            $this->saveAs($this->importUser(), fn () => $this->projectModel->saveEntity($project));
-
-            return $project;
-        } catch (UniqueConstraintViolationException) {
-            $this->registry->resetManager();
-            $found = $this->projectModel->getRepository()->findOneBy(['name' => $name]);
-            if ($found instanceof Project) {
-                return $found;
-            }
-
-            throw new ConnectorConfigurationException('The import project could not be created.');
-        }
-    }
-
-    /**
-     * Configured project name, checked.
-     *
-     * @return string
-     *
-     * @throws ConnectorConfigurationException When it is empty or too long
-     */
-    private function projectName(): string
-    {
-        $name = $this->settings->projectName();
-        if ('' === $name || mb_strlen($name) > self::PROJECT_LIMIT) {
-            throw new ConnectorConfigurationException('The import project name must have 1 to 191 characters (rge_studio_connector_project).');
-        }
-
-        return $name;
-    }
-
-    /**
      * Mautic user every import is saved as.
      *
      * @return User
@@ -470,30 +409,6 @@ class EmailImporter
         }
 
         return $user;
-    }
-
-    /**
-     * Run a save as the import user, then put the previous security token back.
-     *
-     * The token is restored before the response, so no session or cookie is created for the caller.
-     *
-     * @param User     $user Import user
-     * @param callable $save Save to run
-     *
-     * @return void
-     */
-    private function saveAs(User $user, callable $save): void
-    {
-        $previous = $this->tokenStorage->getToken();
-        $token    = new DummyToken();
-        $token->setUser($user);
-        $this->tokenStorage->setToken($token);
-
-        try {
-            $save();
-        } finally {
-            $this->tokenStorage->setToken($previous);
-        }
     }
 
     /**

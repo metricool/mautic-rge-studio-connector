@@ -29,6 +29,14 @@ Feature: Exporting the same design again
     Then the email is unpublished
     And the email version went up by 1
 
+  @projects
+  Scenario: An update puts the email back into the import project, once
+    Given the first email was taken out of the project "RGE Studio"
+    When the design subject changes to "New subject"
+    And RGE Studio sends the design with the secret "current-secret"
+    Then the webhook answers 200 with the result "updated"
+    And the email is in the project "RGE Studio" once
+
   Scenario: An update clears Mautic's preheader field again
     Given someone filled the email's preheader field in Mautic
     When the design subject changes to "New subject"

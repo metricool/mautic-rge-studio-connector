@@ -19,13 +19,17 @@ use Mautic\ProjectBundle\Model\ProjectModel;
 use Mautic\UserBundle\Entity\User;
 use Mautic\UserBundle\Model\UserModel;
 use Mautic\UserBundle\Security\DummyToken;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ActAsUser;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ConnectorConfigurationException;
 use MauticPlugin\RgeStudioConnectorBundle\Import\DesignLinkStore;
 use MauticPlugin\RgeStudioConnectorBundle\Import\EmailImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Import\EmailUsage;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportBusyException;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportResult;
+use MauticPlugin\RgeStudioConnectorBundle\Import\MauticImportProject;
+use MauticPlugin\RgeStudioConnectorBundle\Import\NoImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\UnsubscribeLinkChecker;
 use MauticPlugin\RgeStudioConnectorBundle\Payload\DesignExport;
 use MauticPlugin\RgeStudioConnectorBundle\Payload\DesignExportParser;
@@ -250,6 +254,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
      */
     public function testEmailGoesIntoTheNamedProject(): void
     {
+        $this->requireProjects();
         $other = new Project();
         $other->setName('Other project');
         $this->em->persist($other);
@@ -257,14 +262,97 @@ final class EmailImporterTest extends MauticMysqlTestCase
 
         $email = $this->email($this->importer()->import($this->export(), microtime(true)));
 
-        $projects = [];
-        foreach ($email->getProjects() as $project) {
-            self::assertInstanceOf(Project::class, $project);
-            $projects[] = $project;
-        }
+        $projects = $this->projects($email);
         self::assertCount(1, $projects);
         self::assertSame('RGE Studio', $projects[0]->getName());
         self::assertSame(1, $projects[0]->getCreatedBy());
+    }
+
+    /**
+     * An update puts the email back into the import project when it left it, and never adds it twice.
+     *
+     * @return void
+     */
+    public function testUpdateAddsTheProjectOnlyWhenMissing(): void
+    {
+        $this->requireProjects();
+        $first = $this->importer()->import($this->export(), microtime(true));
+        $email = $this->email($first);
+        foreach ($this->projects($email) as $project) {
+            $email->removeProject($project);
+        }
+        $this->em->persist($email);
+        $this->em->flush();
+        self::assertCount(0, $this->projects($this->email($first)));
+
+        $this->importer()->import($this->export(['subject' => 'Second subject']), microtime(true));
+        $third = $this->importer()->import($this->export(['subject' => 'Third subject']), microtime(true));
+
+        $projects = $this->projects($this->email($third));
+        self::assertCount(1, $projects);
+        self::assertSame('RGE Studio', $projects[0]->getName());
+    }
+
+    /**
+     * The connection test checks the project setting, and every save puts the email into the project the
+     * import prepared as the import user.
+     *
+     * @return void
+     */
+    public function testProjectIsPreparedAndPlacedOnEverySave(): void
+    {
+        $project = new class() implements ImportProject {
+            /**
+             * Calls received, in order.
+             *
+             * @var list<string>
+             */
+            public array $calls = [];
+
+            /**
+             * Record the check.
+             *
+             * @return void
+             */
+            public function check(): void
+            {
+                $this->calls[] = 'check';
+            }
+
+            /**
+             * Record the user the project is prepared for.
+             *
+             * @param User $user Import user
+             *
+             * @return int
+             */
+            public function prepare(User $user): int
+            {
+                $this->calls[] = 'prepare '.$user->getId();
+
+                return 42;
+            }
+
+            /**
+             * Record the project an email is placed into, and whether the email is new.
+             *
+             * @param Email $email     Email being saved
+             * @param int   $projectId Project id from prepare()
+             *
+             * @return void
+             */
+            public function place(Email $email, int $projectId): void
+            {
+                $this->calls[] = 'place '.$projectId.(null === $email->getId() ? ' new' : ' existing');
+            }
+        };
+        $importer = $this->importer([], $project);
+
+        $importer->checkConfiguration();
+        $importer->import($this->export(), microtime(true));
+        $importer->import($this->export(['subject' => 'New subject']), microtime(true));
+
+        self::assertSame(['check', 'prepare 1', 'place 42 new', 'prepare 1', 'place 42 existing'], $project->calls);
     }
 
     /**
@@ -318,8 +406,27 @@ final class EmailImporterTest extends MauticMysqlTestCase
     {
         yield 'no user' => [['rge_studio_connector_user_id' => 0], 'No import user is set (rge_studio_connector_user_id).'];
         yield 'unknown user' => [['rge_studio_connector_user_id' => 999999], 'The import user does not exist (rge_studio_connector_user_id).'];
-        yield 'empty project' => [['rge_studio_connector_project' => ' '], 'The import project name must have 1 to 191 characters (rge_studio_connector_project).'];
-        yield 'long project' => [['rge_studio_connector_project' => str_repeat('é', 192)], 'The import project name must have 1 to 191 characters (rge_studio_connector_project).'];
+    }
+
+    /**
+     * Where Mautic has projects, an empty or too long project name stops the import and the connection test.
+     *
+     * @return void
+     */
+    public function testWrongProjectNameStopsTheImport(): void
+    {
+        $this->requireProjects();
+        foreach ([' ', str_repeat('é', 192)] as $name) {
+            $importer = $this->importer(['rge_studio_connector_project' => $name]);
+            foreach ([fn () => $importer->checkConfiguration(), fn () => $importer->import($this->export(), microtime(true))] as $call) {
+                try {
+                    $call();
+                    self::fail('The import project name was accepted.');
+                } catch (ConnectorConfigurationException $exception) {
+                    self::assertSame('The import project name must have 1 to 191 characters (rge_studio_connector_project).', $exception->getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -329,6 +436,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
      */
     public function testProjectNameAtTheLimitIsAccepted(): void
     {
+        $this->requireProjects();
         $this->importer(['rge_studio_connector_project' => str_repeat('é', 191)])->checkConfiguration();
 
         $this->addToAssertionCount(1);
@@ -364,19 +472,54 @@ final class EmailImporterTest extends MauticMysqlTestCase
     }
 
     /**
+     * Skip the test when this Mautic has no projects (before 7.0).
+     *
+     * @return void
+     */
+    private function requireProjects(): void
+    {
+        if (!class_exists(ProjectModel::class)) {
+            self::markTestSkipped('This Mautic has no projects.');
+        }
+    }
+
+    /**
+     * Projects the email is in.
+     *
+     * @param Email $email Email
+     *
+     * @return list<Project>
+     */
+    private function projects(Email $email): array
+    {
+        $projects = [];
+        foreach ($email->getProjects() as $project) {
+            self::assertInstanceOf(Project::class, $project);
+            $projects[] = $project;
+        }
+
+        return $projects;
+    }
+
+    /**
      * Importer over the test database, with images answered by a mock client.
      *
      * @param array<string, mixed> $parameters Settings to change
+     * @param ImportProject|null   $project    Import project handler, by default the one for this Mautic
      *
      * @return EmailImporter
      */
-    private function importer(array $parameters = []): EmailImporter
+    private function importer(array $parameters = [], ?ImportProject $project = null): EmailImporter
     {
         $container = static::getContainer();
         $settings  = SettingsStub::create(array_merge(['rge_studio_connector_user_id' => 1], $parameters));
         $client    = new MockHttpClient(static fn (string $method, string $url): MockResponse => str_contains($url, 'missing')
             ? new MockResponse('', ['http_code' => 404])
             : new MockResponse(self::PNG));
+        $actAs   = new ActAsUser($container->get(TokenStorageInterface::class));
+        $project ??= class_exists(ProjectModel::class)
+            ? new MauticImportProject($settings, $container->get(ProjectModel::class), $this->em, $container->get(ManagerRegistry::class), $actAs)
+            : new NoImportProject();
 
         return new EmailImporter(
             $settings,
@@ -385,12 +528,11 @@ final class EmailImporterTest extends MauticMysqlTestCase
             new UnsubscribeLinkChecker($settings),
             $container->get(EmailUsage::class),
             $container->get(EmailModel::class),
-            $container->get(ProjectModel::class),
+            $project,
             $container->get(UserModel::class),
-            $container->get(TokenStorageInterface::class),
+            $actAs,
             $container->get(ValidatorInterface::class),
             $this->em,
-            $container->get(ManagerRegistry::class),
         );
     }
 

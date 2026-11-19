@@ -3,7 +3,11 @@
 declare(strict_types=1);
 
 use Mautic\CoreBundle\DependencyInjection\MauticCoreExtension;
+use Mautic\ProjectBundle\Model\ProjectModel;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ImportProject;
+use MauticPlugin\RgeStudioConnectorBundle\Import\MauticImportProject;
+use MauticPlugin\RgeStudioConnectorBundle\Import\NoImportProject;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
@@ -30,8 +34,15 @@ return function (ContainerConfigurator $configurator): void {
         'vendor',
     ];
 
+    $projects = class_exists(ProjectModel::class);
+    if (!$projects) {
+        $excludes[] = 'Import/MauticImportProject.php';
+    }
+
     $services->load('MauticPlugin\\RgeStudioConnectorBundle\\', '../')
         ->exclude('../{'.implode(',', array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, $excludes)).'}');
+
+    $services->alias(ImportProject::class, $projects ? MauticImportProject::class : NoImportProject::class);
 
     $services->set('rge_studio_connector.http_client', NoPrivateNetworkHttpClient::class)
         ->args([service('mautic.native.connector')]);

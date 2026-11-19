@@ -33,5 +33,11 @@ parameters:
 			identifier: symplify.noReference
 			reportUnmatched: false
 		-
+			identifier: symplify.explicitInterfaceSuffixName
+			reportUnmatched: false
+		-
+			identifier: symplify.requiredInterfaceContractNamespace
+			reportUnmatched: false
+		-
 			identifier: doctrine.noGetRepositoryOutsideService
 			reportUnmatched: false
