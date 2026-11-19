@@ -181,7 +181,9 @@ class ConnectorSettings
     }
 
     /**
-     * Seconds all image copies of one export may take together.
+     * Seconds after the request arrived within which all image copies of one export must finish.
+     *
+     * When the wait for an identical export already used that time, the copies still get 10 seconds.
      *
      * @return float
      */

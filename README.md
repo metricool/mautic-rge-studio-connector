@@ -64,7 +64,7 @@ Every other setting is a Mautic parameter, set in `config/local.php`.
 | `rge_studio_connector_max_body_bytes` | 10 MB | Largest export accepted |
 | `rge_studio_connector_max_image_bytes` | 5 MB | Largest image copied |
 | `rge_studio_connector_max_images` | `150` | Most images copied from one export |
-| `rge_studio_connector_image_seconds` | `25` | Seconds all image copies of one export may take |
+| `rge_studio_connector_image_seconds` | `25` | Seconds after the request arrived within which all image copies of one export must finish. When the wait for an identical export already used that time, the copies still get 10 seconds |
 | `rge_studio_connector_image_attempts` | `2` | Download attempts per image |
 | `rge_studio_connector_claim_seconds` | `60` | Seconds after which an unfinished import of a design no longer holds back an identical export |
 | `rge_studio_connector_wait_seconds` | `35` | Seconds after the request arrived that an export waits for an identical one still being imported |
