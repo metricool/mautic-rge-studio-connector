@@ -6,6 +6,7 @@ namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Functional;
 
 use Mautic\CoreBundle\Test\MauticMysqlTestCase;
 use Mautic\EmailBundle\Entity\Email;
+use Mautic\ProjectBundle\Entity\Project;
 use Mautic\UserBundle\Entity\User;
 use MauticPlugin\RgeStudioConnectorBundle\Entity\DesignLink;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -106,7 +107,7 @@ final class WebhookControllerTest extends MauticMysqlTestCase
 
         $this->post($this->body(), self::SECRET);
 
-        $answer = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $answer = $this->answer();
         self::assertSame('unchanged', $answer['result']);
         self::assertNull($this->connection->fetchOne('SELECT pending_hash FROM '.$table));
     }
@@ -121,7 +122,7 @@ final class WebhookControllerTest extends MauticMysqlTestCase
         $this->post($this->body(), self::SECRET);
 
         self::assertSame(Response::HTTP_OK, $this->client->getResponse()->getStatusCode(), (string) $this->client->getResponse()->getContent());
-        $answer = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $answer = $this->answer();
         self::assertSame('created', $answer['result']);
 
         $email = $this->em->getRepository(Email::class)->find($answer['emailId']);
@@ -135,7 +136,12 @@ final class WebhookControllerTest extends MauticMysqlTestCase
         self::assertStringNotContainsString('media.beefree.cloud', (string) $email->getCustomHtml());
         self::assertStringContainsString('/media/images/rge-studio/'.hash('sha256', self::PNG).'.png', (string) $email->getCustomHtml());
         self::assertStringContainsString('Preheader: Twenty percent off', (string) $email->getDescription());
-        self::assertSame(['RGE Studio'], array_map(static fn ($project) => $project->getName(), $email->getProjects()->toArray()));
+        $projects = [];
+        foreach ($email->getProjects() as $project) {
+            self::assertInstanceOf(Project::class, $project);
+            $projects[] = $project->getName();
+        }
+        self::assertSame(['RGE Studio'], $projects);
         self::assertNotNull($email->getCreatedBy());
     }
 
@@ -147,15 +153,15 @@ final class WebhookControllerTest extends MauticMysqlTestCase
     public function testReExportUpdatesTheSameEmail(): void
     {
         $this->post($this->body(), self::SECRET);
-        $first = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $first = $this->answer();
 
         $this->post($this->body(), self::SECRET);
-        $same = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $same = $this->answer();
         self::assertSame('unchanged', $same['result']);
         self::assertSame($first['emailId'], $same['emailId']);
 
         $this->post($this->body(['tags' => ['mautic-campaign'], 'subject' => 'New subject']), self::SECRET);
-        $changed = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $changed = $this->answer();
         self::assertSame('updated', $changed['result']);
         self::assertSame($first['emailId'], $changed['emailId']);
 
@@ -178,7 +184,7 @@ final class WebhookControllerTest extends MauticMysqlTestCase
     public function testPublishedEmailIsNeverChanged(bool $scheduled): void
     {
         $this->post($this->body(), self::SECRET);
-        $first = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $first = $this->answer();
 
         $email = $this->em->getRepository(Email::class)->find($first['emailId']);
         self::assertInstanceOf(Email::class, $email);
@@ -191,7 +197,7 @@ final class WebhookControllerTest extends MauticMysqlTestCase
         $this->em->clear();
 
         $this->post($this->body(['subject' => 'Second version']), self::SECRET);
-        $second = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $second = $this->answer();
 
         self::assertSame('created', $second['result']);
         self::assertNotSame($first['emailId'], $second['emailId']);
@@ -221,7 +227,7 @@ final class WebhookControllerTest extends MauticMysqlTestCase
     {
         $this->post($this->body(['html' => '<html><body><p>No link here</p></body></html>']), self::SECRET);
 
-        $answer = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $answer = $this->answer();
         self::assertSame(Response::HTTP_OK, $this->client->getResponse()->getStatusCode());
 
         $email = $this->em->getRepository(Email::class)->find($answer['emailId']);
@@ -247,6 +253,19 @@ final class WebhookControllerTest extends MauticMysqlTestCase
         }
 
         $this->client->request('POST', self::URL, [], [], $server, $body);
+    }
+
+    /**
+     * Last answer of the webhook, decoded.
+     *
+     * @return array<mixed>
+     */
+    private function answer(): array
+    {
+        $answer = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertIsArray($answer);
+
+        return $answer;
     }
 
     /**

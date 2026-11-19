@@ -45,7 +45,7 @@ class EmailUsage
             return false;
         }
 
-        if (count($email->getVariantChildren()) > 0 || count($email->getTranslationChildren()) > 0) {
+        if (!$email->getVariantChildren()->isEmpty() || !($email->getTranslationChildren()?->isEmpty() ?? true)) {
             return false;
         }
 
@@ -122,7 +122,8 @@ class EmailUsage
             return false;
         }
 
-        $candidates = [$data['email'] ?? null, $data['useremail']['email'] ?? null];
+        $userEmail  = $data['useremail'] ?? null;
+        $candidates = [$data['email'] ?? null, is_array($userEmail) ? $userEmail['email'] ?? null : null];
         foreach ($candidates as $candidate) {
             if (is_scalar($candidate) && (string) $candidate === (string) $emailId) {
                 return true;

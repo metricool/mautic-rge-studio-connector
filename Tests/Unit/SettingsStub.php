@@ -18,12 +18,14 @@ final class SettingsStub
      */
     public static function create(array $parameters = []): ConnectorSettings
     {
-        $config = require __DIR__.'/../../Config/config.php';
-        $values = array_merge(
-            $config['parameters'],
-            ['site_url' => 'https://mautic.example.com', 'static_url' => null, 'unsubscribe_text' => "<a href='|URL|'>Unsubscribe</a>"],
-            $parameters
-        );
+        $config   = require __DIR__.'/../../Config/config.php';
+        $defaults = is_array($config) && is_array($config['parameters'] ?? null) ? $config['parameters'] : [];
+        $values   = [];
+        foreach ([$defaults, ['site_url' => 'https://mautic.example.com', 'static_url' => null, 'unsubscribe_text' => "<a href='|URL|'>Unsubscribe</a>"], $parameters] as $source) {
+            foreach ($source as $name => $value) {
+                $values[(string) $name] = $value;
+            }
+        }
 
         $helper = new class($values) extends CoreParametersHelper {
             /**
@@ -43,7 +45,7 @@ final class SettingsStub
              *
              * @return mixed
              */
-            public function get($name, $default = null)
+            public function get($name, $default = null): mixed
             {
                 return array_key_exists($name, $this->values) && null !== $this->values[$name] ? $this->values[$name] : $default;
             }

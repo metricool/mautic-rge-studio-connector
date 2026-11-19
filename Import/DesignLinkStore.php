@@ -75,7 +75,7 @@ class DesignLinkStore
 
         return [
             'owned'   => $hash === $row['pending_hash'],
-            'emailId' => null === $row['email_id'] ? null : (int) $row['email_id'],
+            'emailId' => is_numeric($row['email_id']) ? (int) $row['email_id'] : null,
         ];
     }
 
@@ -196,14 +196,15 @@ class DesignLinkStore
      */
     private function existingEmailId(mixed $emailId): ?int
     {
-        if (null === $emailId) {
+        if (!is_numeric($emailId)) {
             return null;
         }
 
+        $id     = (int) $emailId;
         $table  = $this->entityManager->getClassMetadata(Email::class)->getTableName();
-        $exists = $this->connection()->fetchOne('SELECT 1 FROM '.$table.' WHERE id = ?', [(int) $emailId]);
+        $exists = $this->connection()->fetchOne('SELECT 1 FROM '.$table.' WHERE id = ?', [$id]);
 
-        return false === $exists ? null : (int) $emailId;
+        return false === $exists ? null : $id;
     }
 
     /**

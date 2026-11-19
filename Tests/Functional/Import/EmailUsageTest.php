@@ -31,9 +31,7 @@ final class EmailUsageTest extends MauticMysqlTestCase
     {
         parent::setUp();
 
-        $usage = static::getContainer()->get(EmailUsage::class);
-        self::assertInstanceOf(EmailUsage::class, $usage);
-        $this->usage = $usage;
+        $this->usage = static::getContainer()->get(EmailUsage::class);
     }
 
     /**
@@ -162,7 +160,7 @@ final class EmailUsageTest extends MauticMysqlTestCase
         $byChannel = $this->email();
         $event     = $this->campaignEvent('email.send', []);
         $event->setChannel('email');
-        $event->setChannelId($byChannel->getId());
+        $event->setChannelId((int) $byChannel->getId());
 
         $toUser = $this->email();
         $this->campaignEvent('email.send.to.user', ['useremail' => ['email' => $toUser->getId()], 'user_id' => [1]]);
@@ -182,7 +180,7 @@ final class EmailUsageTest extends MauticMysqlTestCase
         $email = $this->email();
         $event = $this->campaignEvent('email.send', ['email' => $email->getId()]);
         $event->setChannel('email');
-        $event->setChannelId($email->getId());
+        $event->setChannelId((int) $email->getId());
         $event->setDeleted();
         $this->em->flush();
 
@@ -243,7 +241,7 @@ final class EmailUsageTest extends MauticMysqlTestCase
         $other = $this->email();
         $event = $this->campaignEvent('email.send', ['email' => $other->getId()]);
         $event->setChannel('email');
-        $event->setChannelId($other->getId());
+        $event->setChannelId((int) $other->getId());
         $this->em->flush();
 
         self::assertFalse($this->usage->isUsedByActions((int) $email->getId()));

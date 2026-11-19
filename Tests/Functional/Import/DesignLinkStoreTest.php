@@ -24,9 +24,7 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     {
         parent::setUp();
 
-        $store = static::getContainer()->get(DesignLinkStore::class);
-        self::assertInstanceOf(DesignLinkStore::class, $store);
-        $this->store = $store;
+        $this->store = static::getContainer()->get(DesignLinkStore::class);
     }
 
     /**

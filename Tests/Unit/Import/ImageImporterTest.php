@@ -41,7 +41,9 @@ final class ImageImporterTest extends TestCase
             \RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ($iterator as $file) {
-            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            if ($file instanceof \SplFileInfo) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
         }
         rmdir($this->root);
     }
@@ -196,7 +198,7 @@ final class ImageImporterTest extends TestCase
              *
              * @return string
              */
-            public function getSystemPath($name, $fullPath = false)
+            public function getSystemPath($name, $fullPath = false): string
             {
                 return $fullPath ? $this->root.'/media/images' : 'media/images';
             }

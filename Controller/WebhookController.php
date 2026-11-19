@@ -48,7 +48,8 @@ final class WebhookController
      */
     public function receiveAction(Request $request): JsonResponse
     {
-        $startedAt = (float) $request->server->get('REQUEST_TIME_FLOAT', microtime(true));
+        $arrival   = $request->server->get('REQUEST_TIME_FLOAT');
+        $startedAt = is_numeric($arrival) ? (float) $arrival : microtime(true);
         $body      = $request->getContent();
 
         if (strlen($body) > $this->settings->maxBodyBytes()) {

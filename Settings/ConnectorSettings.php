@@ -57,7 +57,7 @@ class ConnectorSettings
      */
     public function userId(): int
     {
-        return (int) $this->parameters->get('rge_studio_connector_user_id', 0);
+        return $this->integer('rge_studio_connector_user_id', 0);
     }
 
     /**
@@ -157,7 +157,7 @@ class ConnectorSettings
      */
     public function maxBodyBytes(): int
     {
-        return max(1024, (int) $this->parameters->get('rge_studio_connector_max_body_bytes', 10485760));
+        return max(1024, $this->integer('rge_studio_connector_max_body_bytes', 10485760));
     }
 
     /**
@@ -167,7 +167,7 @@ class ConnectorSettings
      */
     public function maxImageBytes(): int
     {
-        return max(1024, (int) $this->parameters->get('rge_studio_connector_max_image_bytes', 5242880));
+        return max(1024, $this->integer('rge_studio_connector_max_image_bytes', 5242880));
     }
 
     /**
@@ -177,7 +177,7 @@ class ConnectorSettings
      */
     public function maxImages(): int
     {
-        return max(1, (int) $this->parameters->get('rge_studio_connector_max_images', 150));
+        return max(1, $this->integer('rge_studio_connector_max_images', 150));
     }
 
     /**
@@ -187,7 +187,7 @@ class ConnectorSettings
      */
     public function imageSeconds(): float
     {
-        return max(1.0, (float) $this->parameters->get('rge_studio_connector_image_seconds', 25));
+        return max(1.0, $this->number('rge_studio_connector_image_seconds', 25.0));
     }
 
     /**
@@ -197,7 +197,7 @@ class ConnectorSettings
      */
     public function imageAttempts(): int
     {
-        return max(1, (int) $this->parameters->get('rge_studio_connector_image_attempts', 2));
+        return max(1, $this->integer('rge_studio_connector_image_attempts', 2));
     }
 
     /**
@@ -207,7 +207,7 @@ class ConnectorSettings
      */
     public function claimSeconds(): int
     {
-        return max(10, (int) $this->parameters->get('rge_studio_connector_claim_seconds', 60));
+        return max(10, $this->integer('rge_studio_connector_claim_seconds', 60));
     }
 
     /**
@@ -217,7 +217,7 @@ class ConnectorSettings
      */
     public function waitSeconds(): float
     {
-        return max(0.0, (float) $this->parameters->get('rge_studio_connector_wait_seconds', 35));
+        return max(0.0, $this->number('rge_studio_connector_wait_seconds', 35.0));
     }
 
     /**
@@ -284,6 +284,36 @@ class ConnectorSettings
     }
 
     /**
+     * Parameter as a whole number.
+     *
+     * @param string $name    Parameter name
+     * @param int    $default Value when the parameter is missing or not a number
+     *
+     * @return int
+     */
+    private function integer(string $name, int $default): int
+    {
+        $value = $this->parameters->get($name, $default);
+
+        return is_numeric($value) ? (int) $value : $default;
+    }
+
+    /**
+     * Parameter as a number.
+     *
+     * @param string $name    Parameter name
+     * @param float  $default Value when the parameter is missing or not a number
+     *
+     * @return float
+     */
+    private function number(string $name, float $default): float
+    {
+        $value = $this->parameters->get($name, $default);
+
+        return is_numeric($value) ? (float) $value : $default;
+    }
+
+    /**
      * Parameter as a list of non-empty strings.
      *
      * @param string $name Parameter name
@@ -300,7 +330,7 @@ class ConnectorSettings
             return [];
         }
 
-        $items = array_map(static fn ($item): string => is_scalar($item) ? trim((string) $item) : '', $value);
+        $items = array_map(static fn (mixed $item): string => is_scalar($item) ? trim((string) $item) : '', $value);
 
         return array_values(array_filter($items, static fn (string $item): bool => '' !== $item));
     }
