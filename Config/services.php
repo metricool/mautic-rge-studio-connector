@@ -5,9 +5,10 @@ declare(strict_types=1);
 use Mautic\CoreBundle\DependencyInjection\MauticCoreExtension;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
-use Symfony\Component\HttpClient\NoPrivateNetworkHttpClient;
 
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
+
+use Symfony\Component\HttpClient\NoPrivateNetworkHttpClient;
 
 return function (ContainerConfigurator $configurator): void {
     $services = $configurator->services()
