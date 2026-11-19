@@ -166,5 +166,7 @@ Feature: Images are copied into Mautic
       <img src="http://127.0.0.1/internal.png">
       """
     And the real HTTP client is used
+    And a listener on 127.0.0.1 counts the requests it receives
     When RGE Studio sends the design with the secret "current-secret"
-    Then the email name is "[FIX IMAGES] Spring offer"
+    Then the listener received no request
+    And the email name is "[FIX IMAGES] Spring offer"
