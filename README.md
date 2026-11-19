@@ -69,7 +69,9 @@ Every other setting is a Mautic parameter, set in `config/local.php`.
 
 ## Code checks
 
-The code passes PHPStan at its highest level (`phpstan.neon`) and Mautic's PHP-CS-Fixer rules (`.php-cs-fixer.php`), with one difference: full docblocks stay, `@return` included. Both checks and the tests run from a Mautic 7.2 install with its development dependencies, with the plugin in `plugins/RgeStudioConnectorBundle`.
+The code passes PHPStan at its highest level (`phpstan.neon`) and Mautic's PHP-CS-Fixer rules (`.php-cs-fixer.php`), with one difference: full docblocks stay, `@return` included. Every function stays under cyclomatic complexity 10 (`phpcs.xml.dist`, PHP_CodeSniffer). The tests (`phpunit.xml.dist`) are measured with mutation testing (`infection.json5`). The behaviour is written as Gherkin features in `features/`.
+
+The checks and the tests run from a Mautic 7.2 install with its development dependencies, with the plugin in `plugins/RgeStudioConnectorBundle`. PHP_CodeSniffer and Infection are not part of Mautic's development dependencies.
 
 ## Licence
 
