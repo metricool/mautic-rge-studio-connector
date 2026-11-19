@@ -220,6 +220,24 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     }
 
     /**
+     * Exports that arrive in the same microsecond are told apart by the order they claim: a different export takes
+     * over, and a copy of the applied export does not stop it.
+     *
+     * @return void
+     */
+    public function testExportsArrivingTogetherKeepTheClaimOrder(): void
+    {
+        $email = $this->email();
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('a'), 100, (int) $email->getId(), $this->now());
+
+        self::assertSame(Claim::CLAIMED, $this->store->claim(self::DESIGN, $this->hash('b'), 300, $this->now(), 60)->state);
+        self::assertSame(Claim::CLAIMED, $this->store->claim(self::DESIGN, $this->hash('c'), 300, $this->now(), 60)->state);
+        self::assertSame(Claim::UNCHANGED, $this->store->claim(self::DESIGN, $this->hash('a'), 300, $this->now(), 60)->state);
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('c'), 300)['owned']);
+    }
+
+    /**
      * A released claim does not hold back the next export.
      *
      * @return void

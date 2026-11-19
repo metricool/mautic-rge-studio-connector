@@ -363,6 +363,37 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * Plain images before and after personalised addresses are all replaced, and when the patterns cannot run, as
+     * when PCRE hits its backtracking limit, the HTML is kept as it is.
+     *
+     * @return void
+     */
+    public function testImagesAroundPersonalisedAddressesAreReplaced(): void
+    {
+        $html = '<img src="https://cdn.example.org/a.png"><img src="https://cdn.example.org/a.png?n={contactfield=firstname}">'
+            .'<img src="https://cdn.example.org/a.png"><img src="https://cdn.example.org/a.png?n={contactfield=lastname}">'
+            .'<img src="https://cdn.example.org/a.png">';
+        $copy = 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG).'.png';
+
+        $result = $this->importer(new MockHttpClient(new MockResponse(self::PNG)))->import($html, microtime(true) + 30);
+
+        self::assertSame(str_replace('"https://cdn.example.org/a.png"', '"'.$copy.'"', $html), $result->html);
+
+        $jit       = ini_get('pcre.jit');
+        $backtrack = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+        try {
+            $failed = $this->importer(new MockHttpClient(new MockResponse(self::PNG)))->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+        } finally {
+            ini_set('pcre.jit', false === $jit ? '1' : $jit);
+            ini_set('pcre.backtrack_limit', false === $backtrack ? '1000000' : $backtrack);
+        }
+
+        self::assertSame('<img src="https://cdn.example.org/a.png">', $failed->html);
+    }
+
+    /**
      * A quoted CSS address may hold parentheses, in plain or entity quotes, and an unquoted one still works.
      *
      * @return void
