@@ -173,6 +173,56 @@ final class EmailImporterTest extends MauticMysqlTestCase
     }
 
     /**
+     * An update that keeps the email's type leaves its send settings alone.
+     *
+     * @return void
+     */
+    public function testUpdateOfTheSameTypeKeepsTheSendSettings(): void
+    {
+        $first   = $this->importer()->import($this->export(), microtime(true));
+        $email   = $this->email($first);
+        $segment = new LeadList();
+        $segment->setName('Kept');
+        $segment->setAlias('rge-kept');
+        $segment->setPublicName('Kept');
+        $this->em->persist($segment);
+        $email->addExcludedList($segment);
+        $this->em->persist($email);
+        $this->em->flush();
+        $this->em->clear();
+
+        $second = $this->importer()->import($this->export(['subject' => 'New subject']), microtime(true));
+
+        $updated = $this->email($second);
+        self::assertSame(ImportResult::UPDATED, $second->state);
+        self::assertSame('list', $updated->getEmailType());
+        self::assertSame('New subject', $updated->getSubject());
+        self::assertCount(1, $updated->getExcludedLists());
+    }
+
+    /**
+     * An email published behind the importer's back is read fresh from the database, so the export makes a
+     * new email instead of changing the published one.
+     *
+     * @return void
+     */
+    public function testEmailPublishedMeanwhileIsReadFresh(): void
+    {
+        $importer = $this->importer();
+        $first    = $importer->import($this->export(), microtime(true));
+        $cached   = $this->em->find(Email::class, $first->emailId);
+        self::assertInstanceOf(Email::class, $cached);
+        self::assertFalse($cached->isPublished());
+        $table = $this->em->getClassMetadata(Email::class)->getTableName();
+        $this->connection->executeStatement('UPDATE '.$table.' SET is_published = 1 WHERE id = ?', [$first->emailId]);
+
+        $second = $importer->import($this->export(['subject' => 'New subject']), microtime(true));
+
+        self::assertSame(ImportResult::CREATED, $second->state);
+        self::assertNotSame($first->emailId, $second->emailId);
+    }
+
+    /**
      * Where Mautic's email has a version and continued sending (after 5.2), an update raises the version by one
      * and a change of type stops continued sending.
      *

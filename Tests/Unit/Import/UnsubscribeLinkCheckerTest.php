@@ -116,11 +116,12 @@ final class UnsubscribeLinkCheckerTest extends TestCase
     public function testProblemsAreReportedOnceWithTheirWording(): void
     {
         $html = '<body><a href="{unsubscribe_url}">x</a><p>{UNSUBSCRIBE_TEXT} {Unsubscribe_Url}</p>'
-            .'<a href="%7bunsubscribe_url%7d">y</a>'
+            .'<a href="%7bunsubscribe_url%7d">y</a><p>&#123;unsubscribe_text&#125;</p>'
             .'<a href="https://m.example.com/email/unsubscribe/abc">z</a><a href="https://m.example.com/email/dnc/abc">w</a></body>';
 
         $expected = [
             'An unsubscribe token is URL-encoded (%7B...%7D), and Mautic never replaces it.',
+            'An unsubscribe token is written with HTML entities, and Mautic never replaces it.',
             'A pasted unsubscribe address (/email/unsubscribe/) is in the HTML. It only works for one contact.',
             'A pasted unsubscribe address (/email/dnc/) is in the HTML. It only works for one contact.',
         ];

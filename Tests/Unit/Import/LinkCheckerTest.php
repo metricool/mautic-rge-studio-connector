@@ -72,6 +72,7 @@ final class LinkCheckerTest extends TestCase
     public function testEntitiesAreDecoded(): void
     {
         self::assertSame(['javascript:alert("x")'], (new LinkChecker())->invalidLinks('<a href="javascript:alert(&quot;x&quot;)">x</a>'));
+        self::assertSame(["javascript:alert('x')"], (new LinkChecker())->invalidLinks('<a href="javascript:alert(&amp;apos;x&amp;apos;)">x</a>'));
     }
 
     /**

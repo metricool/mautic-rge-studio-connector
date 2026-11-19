@@ -27,7 +27,7 @@ final class LinkCheckerParityTest extends TestCase
             '{unsubscribe_url}', '{webview_url}', '#top', '#', 'https://example.com', 'https://example.com/spring offer/?a=1&amp;b=2',
             'http://example.com/a', 'HTTPS://example.com', 'ftp://example.com/file.pdf', 'ftps://example.com/file.pdf',
             'mailto:hello@example.com', 'tel:+34600000000', 'sms:+34600000000', 'www.example.com', 'javascript:alert(1)', '',
-            'https://exa mple.com', '{unsubscribe_url}x', 'https://', '/spring', 'javascript:alert(&quot;x&quot;)', 'data:text/html,x',
+            'https://exa mple.com', '{unsubscribe_url}x', 'https://', '/spring', 'javascript:alert(&quot;x&quot;)', 'javascript:alert(&amp;apos;x&amp;apos;)', 'data:text/html,x',
             'https://example.com/%zz', 'https://user@example.com', '  https://example.com', 'https://example.com#a b',
         ];
         $html = '<body>'.implode('', array_map(static fn (string $href): string => '<a href="'.$href.'">x</a>', $hrefs)).'</body>';
