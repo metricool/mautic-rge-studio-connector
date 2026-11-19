@@ -67,6 +67,10 @@ Every other setting is a Mautic parameter, set in `config/local.php`.
 | `rge_studio_connector_claim_seconds` | `60` | Seconds after which an unfinished import of a design no longer holds back an identical export |
 | `rge_studio_connector_wait_seconds` | `35` | Seconds after the request arrived that an export waits for an identical one still being imported |
 
+## Code checks
+
+The code passes PHPStan at its highest level (`phpstan.neon`) and Mautic's PHP-CS-Fixer rules (`.php-cs-fixer.php`), with one difference: full docblocks stay, `@return` included. Both checks and the tests run from a Mautic 7.2 install with its development dependencies, with the plugin in `plugins/RgeStudioConnectorBundle`.
+
 ## Licence
 
 GPL-3.0-or-later, the same as Mautic.
