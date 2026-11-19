@@ -51,11 +51,11 @@ Feature: The unsubscribe link is checked
       | <!-- <a href="{unsubscribe_url}">Unsubscribe</a> -->                                        | The unsubscribe link is only inside HTML comments, so most email apps never show it.                                           |
       | <a href="{unsubscribe_url}">Unsubscribe</a><a href="https://x.example/?u={unsubscribe_url}">Again</a> | An unsubscribe token sits inside a longer address or inside an attribute, so that link breaks.                    |
       | <a href="{unsubscribe_url}">Unsubscribe</a><img alt="{unsubscribe_text}">                    | An unsubscribe token sits inside a longer address or inside an attribute, so that link breaks.                                 |
-      | <a href="{unsubscribe_url}">Unsubscribe</a><p>{UNSUBSCRIBE_TEXT}</p>                         | An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking.                          |
       | <a href="{unsubscribe_url}">Unsubscribe</a><a href="%7Bunsubscribe_url%7D">Again</a>         | An unsubscribe token is URL-encoded (%7B...%7D), and Mautic never replaces it.                                                  |
       | <a href="{unsubscribe_url}">Unsubscribe</a><p>&#123;unsubscribe_text&#125;</p>               | An unsubscribe token is written with HTML entities, and Mautic never replaces it.                                               |
       | <a href="{unsubscribe_url}">Unsubscribe</a><a href="https://mautic.example.com/email/unsubscribe/abc">Old</a> | A pasted unsubscribe address (/email/unsubscribe/) is in the HTML. It only works for one contact.                |
 
+  @header-rule
   Scenario: Mautic would send no List-Unsubscribe header
     Given Mautic's unsubscribe text setting does not hold the unsubscribe address
     And a design 1234567 named "Spring offer" with the HTML:
@@ -65,6 +65,27 @@ Feature: The unsubscribe link is checked
     When RGE Studio sends the design with the secret "current-secret"
     Then the email name is "[FIX UNSUBSCRIBE] Spring offer"
     And the email description contains "[FIX UNSUBSCRIBE] Mautic will send no List-Unsubscribe header."
+
+  @header-rule
+  Scenario: A token in capitals gets no List-Unsubscribe header
+    Given a design 1234567 named "Spring offer" with the HTML:
+      """
+      <a href="{unsubscribe_url}">Unsubscribe</a><p>{UNSUBSCRIBE_TEXT}</p>
+      """
+    When RGE Studio sends the design with the secret "current-secret"
+    Then the email name is "[FIX UNSUBSCRIBE] Spring offer"
+    And the email description contains "[FIX UNSUBSCRIBE] An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking."
+
+  @no-header-rule
+  Scenario: Where Mautic adds the List-Unsubscribe header to every email, the header is not checked
+    Given Mautic's unsubscribe text setting does not hold the unsubscribe address
+    And a design 1234567 named "Spring offer" with the HTML:
+      """
+      <p>{unsubscribe_text}</p><p>{UNSUBSCRIBE_TEXT}</p>
+      """
+    When RGE Studio sends the design with the secret "current-secret"
+    Then the email name is "Spring offer"
+    And the answer counts 0 problems
 
   Scenario: A quoted greater-than sign inside an attribute does not hide the link
     Given a design 1234567 named "Spring offer" with the HTML:

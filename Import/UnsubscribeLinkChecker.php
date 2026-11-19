@@ -15,10 +15,21 @@ class UnsubscribeLinkChecker
     /**
      * Build the checker.
      *
-     * @param ConnectorSettings $settings Plugin settings
+     * @param ConnectorSettings $settings   Plugin settings
+     * @param bool              $headerRule Whether this Mautic adds List-Unsubscribe only when the HTML asks for it (7.2 and later)
      */
-    public function __construct(private ConnectorSettings $settings)
+    public function __construct(private ConnectorSettings $settings, private bool $headerRule)
     {
+    }
+
+    /**
+     * Whether this Mautic adds List-Unsubscribe only when the HTML asks for it (7.2 and later).
+     *
+     * @return bool
+     */
+    public static function mauticHasHeaderRule(): bool
+    {
+        return (new \ReflectionClass(MailHelper::class))->hasMethod('isUnsubscribeHeadersRequired');
     }
 
     /**
@@ -44,11 +55,11 @@ class UnsubscribeLinkChecker
      */
     public function check(string $html): array
     {
-        return array_merge($this->linkProblems($html), $this->tokenProblems($html), $this->pastedProblems($html));
+        return array_merge($this->linkProblems($html), $this->headerProblems($html), $this->tokenProblems($html), $this->pastedProblems($html));
     }
 
     /**
-     * Problems with where the unsubscribe link sits and whether Mautic adds its header.
+     * Problems with where the unsubscribe link sits.
      *
      * @param string $html Email HTML as it will be stored
      *
@@ -57,8 +68,7 @@ class UnsubscribeLinkChecker
     private function linkProblems(string $html): array
     {
         $problems = [];
-        $visible  = preg_replace('/<!--.*?-->/s', '', $html) ?? '';
-        $outside  = $this->scan($visible);
+        $outside  = $this->scan($this->withoutComments($html));
         $anywhere = $this->scan($html);
 
         if (!$outside['working']) {
@@ -71,11 +81,50 @@ class UnsubscribeLinkChecker
             $problems[] = 'An unsubscribe token sits inside a longer address or inside an attribute, so that link breaks.';
         }
 
-        if ($outside['working'] && !MailHelper::isUnsubscribeHeadersRequired($html, $this->settings->unsubscribeTextSetting())) {
+        return $problems;
+    }
+
+    /**
+     * Problems with the List-Unsubscribe header, where Mautic adds it only when the HTML asks for it.
+     *
+     * Older Mautic versions add the header to every email that is not transactional, so nothing is checked there.
+     *
+     * @param string $html Email HTML as it will be stored
+     *
+     * @return list<string>
+     */
+    private function headerProblems(string $html): array
+    {
+        if (!$this->headerRule) {
+            return [];
+        }
+
+        $problems = [];
+        if ($this->scan($this->withoutComments($html))['working'] && !MailHelper::isUnsubscribeHeadersRequired($html, $this->settings->unsubscribeTextSetting())) {
             $problems[] = 'Mautic will send no List-Unsubscribe header. Use {unsubscribe_url} in lower case, or an unsubscribe text setting that holds |URL|.';
         }
 
+        preg_match_all('/\{unsubscribe_(?:url|text)\}/i', $html, $tokens);
+        foreach ($tokens[0] as $token) {
+            if ($token !== strtolower($token)) {
+                $problems[] = 'An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking.';
+                break;
+            }
+        }
+
         return $problems;
+    }
+
+    /**
+     * HTML without its comments.
+     *
+     * @param string $html Email HTML
+     *
+     * @return string
+     */
+    private function withoutComments(string $html): string
+    {
+        return preg_replace('/<!--.*?-->/s', '', $html) ?? '';
     }
 
     /**
@@ -88,14 +137,6 @@ class UnsubscribeLinkChecker
     private function tokenProblems(string $html): array
     {
         $problems = [];
-
-        preg_match_all('/\{unsubscribe_(?:url|text)\}/i', $html, $tokens);
-        foreach ($tokens[0] as $token) {
-            if ($token !== strtolower($token)) {
-                $problems[] = 'An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking.';
-                break;
-            }
-        }
 
         if (1 === preg_match('/%7B\s*(?:unsubscribe_(?:url|text)|dnc_url)/i', $html)) {
             $problems[] = 'An unsubscribe token is URL-encoded (%7B...%7D), and Mautic never replaces it.';

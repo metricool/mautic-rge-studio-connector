@@ -525,7 +525,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
             $settings,
             $container->get(DesignLinkStore::class),
             new ImageImporter($client, $container->get(PathsHelper::class), $settings),
-            new UnsubscribeLinkChecker($settings),
+            new UnsubscribeLinkChecker($settings, UnsubscribeLinkChecker::mauticHasHeaderRule()),
             $container->get(EmailUsage::class),
             $container->get(EmailModel::class),
             $project,

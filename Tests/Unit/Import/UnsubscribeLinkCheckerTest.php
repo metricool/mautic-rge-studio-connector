@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\Import;
 
+use Mautic\EmailBundle\Validator\ValidEmailLinks;
 use MauticPlugin\RgeStudioConnectorBundle\Import\UnsubscribeLinkChecker;
 use MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\SettingsStub;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -74,7 +75,6 @@ final class UnsubscribeLinkCheckerTest extends TestCase
         yield 'url encoded' => ['<body><a href="{unsubscribe_url}">x</a><a href="%7Bunsubscribe_url%7D">y</a></body>', 'URL-encoded'];
         yield 'upper case hex entity' => ['<body><a href="{unsubscribe_url}">x</a><p>&#X7B;unsubscribe_text&#X7D;</p></body>', 'HTML entities'];
         yield 'html entities' => ['<body><a href="{unsubscribe_url}">x</a><a href="&#123;unsubscribe_url&#125;">y</a></body>', 'HTML entities'];
-        yield 'upper case' => ['<body><a href="{Unsubscribe_URL}">x</a></body>', 'not all in lower case'];
         yield 'pasted address' => ['<body><a href="{unsubscribe_url}">x</a><a href="https://m.example.com/email/unsubscribe/abc">y</a></body>', 'pasted unsubscribe address'];
     }
 
@@ -115,24 +115,62 @@ final class UnsubscribeLinkCheckerTest extends TestCase
             .'<a href="%7bunsubscribe_url%7d">y</a>'
             .'<a href="https://m.example.com/email/unsubscribe/abc">z</a><a href="https://m.example.com/email/dnc/abc">w</a></body>';
 
-        self::assertSame([
-            'An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking.',
+        $expected = [
             'An unsubscribe token is URL-encoded (%7B...%7D), and Mautic never replaces it.',
             'A pasted unsubscribe address (/email/unsubscribe/) is in the HTML. It only works for one contact.',
             'A pasted unsubscribe address (/email/dnc/) is in the HTML. It only works for one contact.',
-        ], $this->checker()->check($html));
+        ];
+        self::assertSame($expected, $this->checker()->check($html));
+
+        if ($this->hasHeaderRule()) {
+            array_unshift($expected, 'An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking.');
+            self::assertSame($expected, $this->checker(true)->check($html));
+        }
     }
 
     /**
-     * Without |URL| in the setting the text token gives no List-Unsubscribe header.
+     * The header rule is found exactly in the Mautic versions that also have Mautic's own link rule (7.2 and later).
      *
      * @return void
      */
-    public function testTextTokenWithoutUrlInSettingIsReported(): void
+    public function testHeaderRuleIsFoundFromMautic72(): void
     {
-        $checker = new UnsubscribeLinkChecker(SettingsStub::create(['unsubscribe_text' => 'Unsubscribe here']));
+        self::assertSame(class_exists(ValidEmailLinks::class), UnsubscribeLinkChecker::mauticHasHeaderRule());
+    }
 
-        self::assertStringContainsString('List-Unsubscribe', implode(' ', $checker->check('<body><p>{unsubscribe_text}</p></body>')));
+    /**
+     * Where Mautic adds the header to every email, a text token without |URL| in the setting and a token in
+     * capitals are not reported.
+     *
+     * @return void
+     */
+    public function testHeaderIsNotCheckedWithoutTheHeaderRule(): void
+    {
+        $html = '<body><p>{unsubscribe_text}</p><a href="{Unsubscribe_URL}">x</a></body>';
+
+        self::assertSame([], $this->checker(false, ['unsubscribe_text' => 'Unsubscribe here'])->check($html));
+    }
+
+    /**
+     * Where Mautic adds the header only when the HTML asks for it, a text token without |URL| in the setting
+     * and a token in capitals are reported.
+     *
+     * @return void
+     */
+    public function testHeaderIsCheckedWithTheHeaderRule(): void
+    {
+        if (!$this->hasHeaderRule()) {
+            self::markTestSkipped('This Mautic adds the List-Unsubscribe header to every email.');
+        }
+
+        $html = '<body><p>{unsubscribe_text}</p><a href="{Unsubscribe_URL}">x</a></body>';
+
+        self::assertSame([
+            'Mautic will send no List-Unsubscribe header. Use {unsubscribe_url} in lower case, or an unsubscribe text setting that holds |URL|.',
+            'An unsubscribe token is not all in lower case, so it gets no List-Unsubscribe header and no tracking.',
+        ], $this->checker(true, ['unsubscribe_text' => 'Unsubscribe here'])->check($html));
+        self::assertSame([], $this->checker(true)->check('<body><p>{unsubscribe_text}</p></body>'));
+        self::assertSame([], $this->checker(true)->check('<body><!-- {unsubscribe_text} --><a href="{unsubscribe_url}">x</a></body>'));
     }
 
     /**
@@ -151,12 +189,25 @@ final class UnsubscribeLinkCheckerTest extends TestCase
     }
 
     /**
-     * Checker over the default settings.
+     * Checker over the given settings.
+     *
+     * @param bool                 $headerRule Whether Mautic adds List-Unsubscribe only when the HTML asks for it
+     * @param array<string, mixed> $parameters Settings to change
      *
      * @return UnsubscribeLinkChecker
      */
-    private function checker(): UnsubscribeLinkChecker
+    private function checker(bool $headerRule = false, array $parameters = []): UnsubscribeLinkChecker
     {
-        return new UnsubscribeLinkChecker(SettingsStub::create());
+        return new UnsubscribeLinkChecker(SettingsStub::create($parameters), $headerRule);
+    }
+
+    /**
+     * Whether this Mautic has the rule that adds List-Unsubscribe only when the HTML asks for it.
+     *
+     * @return bool
+     */
+    private function hasHeaderRule(): bool
+    {
+        return UnsubscribeLinkChecker::mauticHasHeaderRule();
     }
 }

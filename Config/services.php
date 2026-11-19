@@ -8,6 +8,7 @@ use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\MauticImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\NoImportProject;
+use MauticPlugin\RgeStudioConnectorBundle\Import\UnsubscribeLinkChecker;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
@@ -49,4 +50,7 @@ return function (ContainerConfigurator $configurator): void {
 
     $services->get(ImageImporter::class)
         ->arg('$httpClient', service('rge_studio_connector.http_client'));
+
+    $services->get(UnsubscribeLinkChecker::class)
+        ->arg('$headerRule', UnsubscribeLinkChecker::mauticHasHeaderRule());
 };
