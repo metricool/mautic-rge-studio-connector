@@ -1,0 +1,28 @@
+{
+    "name": "metricool/mautic-rge-studio-connector",
+    "description": "Turns RGE Studio (formerly Beefree) Custom Connector exports into Mautic emails",
+    "type": "mautic-plugin",
+    "license": "GPL-3.0-or-later",
+    "keywords": ["mautic", "plugin", "integration", "rge-studio", "reallygoodemails", "beefree", "custom-connector", "email"],
+    "homepage": "https://github.com/metricool/mautic-rge-studio-connector",
+    "require": {
+        "php": "^8.2",
+        "ext-json": "*",
+        "mautic/core-lib": "^7.2"
+    },
+    "extra": {
+        "install-directory-name": "RgeStudioConnectorBundle"
+    },
+    "autoload": {
+        "psr-4": {
+            "MauticPlugin\\RgeStudioConnectorBundle\\": ""
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "MauticPlugin\\RgeStudioConnectorBundle\\Tests\\": "Tests"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
