@@ -343,6 +343,50 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * A personalised address that starts with the address of a plain image stays exactly as designed, whether the
+     * plain image is copied or not.
+     *
+     * @return void
+     */
+    public function testPersonalisedAddressStartingWithAPlainOneIsKept(): void
+    {
+        $personalised = '<img src="https://images.example.org/hello.png?name={contactfield=firstname}">'
+            .'<img srcset="https://images.example.org/hello.png?n=%7Bcontactfield%7D 2x">';
+        $html = '<img src="https://images.example.org/hello.png">'.$personalised;
+
+        $copied = $this->importer(new MockHttpClient(new MockResponse(self::PNG)))->import($html, microtime(true) + 30);
+        $failed = $this->importer(new MockHttpClient(new MockResponse('', ['http_code' => 404])))->import($html, microtime(true) + 30);
+
+        $copy = 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG).'.png';
+        self::assertSame('<img src="'.$copy.'">'.$personalised, $copied->html);
+        self::assertSame('<img src="">'.$personalised, $failed->html);
+    }
+
+    /**
+     * A quoted CSS address may hold parentheses, in plain or entity quotes, and an unquoted one still works.
+     *
+     * @return void
+     */
+    public function testQuotedCssAddressesMayHoldParentheses(): void
+    {
+        $client = new MockHttpClient(static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $html   = '<td style="background:url(\'https://cdn.example.org/hero(1).png\')">'
+            .'<td style="background:url( &quot;https://cdn.example.org/hero(2).png&quot; )">'
+            .'<td style="background:url(https://cdn.example.org/3.png)">';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $copy = fn (string $url): string => 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG.$url).'.png';
+        self::assertSame(3, $result->copied);
+        self::assertSame(
+            '<td style="background:url(\''.$copy('https://cdn.example.org/hero(1).png').'\')">'
+            .'<td style="background:url( &quot;'.$copy('https://cdn.example.org/hero(2).png').'&quot; )">'
+            .'<td style="background:url('.$copy('https://cdn.example.org/3.png').')">',
+            $result->html
+        );
+    }
+
+    /**
      * Two spellings of one address are downloaded once and both point to the copy.
      *
      * @return void

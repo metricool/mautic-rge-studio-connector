@@ -60,10 +60,33 @@ class ImageImporter
             }
         }
 
-        $html   = str_replace($search, $replace, $html);
+        $html   = $this->replaceOutsideTokens($html, $search, $replace);
         $copied = count(array_filter($outcomes, static fn (array $outcome): bool => isset($outcome['url'])));
 
         return new ImageImportResult($html, $copied, array_merge(array_values($failures), $this->leftovers($html)));
+    }
+
+    /**
+     * Replace the image references everywhere except inside addresses that hold a Mautic token.
+     *
+     * A personalised address can start with the address of a plain image, and it must stay exactly as designed.
+     *
+     * @param string       $html    Email HTML
+     * @param list<string> $search  Texts to replace, longest first
+     * @param list<string> $replace Replacement for each text
+     *
+     * @return string
+     */
+    private function replaceOutsideTokens(string $html, array $search, array $replace): string
+    {
+        $parts = preg_split('#((?:https?:)?//[^\s"\'<>(),]*(?:\{|%7B)[^\s"\'<>(),]*)#i', $html, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$html];
+        foreach ($parts as $index => $part) {
+            if (0 === $index % 2) {
+                $parts[$index] = str_replace($search, $replace, $part);
+            }
+        }
+
+        return implode('', $parts);
     }
 
     /**
@@ -136,6 +159,8 @@ class ImageImporter
     /**
      * Addresses in CSS url() values, outside @import rules and @font-face blocks.
      *
+     * A quoted value may hold parentheses, an unquoted one may not.
+     *
      * @param string $html Email HTML
      *
      * @return list<string>
@@ -143,9 +168,10 @@ class ImageImporter
     private function cssAddresses(string $html): array
     {
         $css = preg_replace(['/@import[^;]*;/i', '/@font-face\s*\{[^}]*\}/i'], '', $html) ?? '';
-        preg_match_all('/url\(\s*((?:&quot;|&apos;|&#0*(?:34|39);|&#x0*(?:22|27);|["\'])?)([^"\')]+?)\1\s*\)/i', $css, $matches);
+        preg_match_all('/url\(\s*(&quot;|&apos;|&#0*(?:34|39);|&#x0*(?:22|27);|["\'])(.+?)\1\s*\)/i', $css, $quoted);
+        preg_match_all('/url\(\s*([^\s"\'()&][^\s"\'()]*)\s*\)/i', $css, $unquoted);
 
-        return $matches[2];
+        return array_merge($quoted[2], $unquoted[1]);
     }
 
     /**
