@@ -14,6 +14,8 @@ return function (ContainerConfigurator $configurator): void {
 
     $excludes = [
         'Tests',
+        'Payload/DesignExport.php',
+        'Payload/InvalidExportException.php',
         'vendor',
     ];
 
