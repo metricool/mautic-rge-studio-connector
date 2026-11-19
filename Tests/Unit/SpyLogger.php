@@ -16,14 +16,20 @@ final class SpyLogger extends AbstractLogger
     /**
      * Keep the record instead of writing it anywhere.
      *
-     * @param mixed              $level   Log level
-     * @param string|\Stringable $message Message
-     * @param array<mixed>       $context Context values
+     * The message is not typed, so the logger fits both the older and the newer PSR-3 interface.
+     *
+     * @param mixed        $level   Log level
+     * @param mixed        $message Message
+     * @param array<mixed> $context Context values
      *
      * @return void
      */
-    public function log($level, string|\Stringable $message, array $context = []): void
+    public function log($level, mixed $message, array $context = []): void
     {
-        $this->records[] = ['level' => is_string($level) ? $level : '', 'message' => (string) $message, 'context' => $context];
+        $this->records[] = [
+            'level'   => is_string($level) ? $level : '',
+            'message' => is_string($message) || $message instanceof \Stringable ? (string) $message : '',
+            'context' => $context,
+        ];
     }
 }

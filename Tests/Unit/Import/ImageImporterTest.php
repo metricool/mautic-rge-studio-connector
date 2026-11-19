@@ -144,6 +144,8 @@ final class ImageImporterTest extends TestCase
     /**
      * No SVG is kept, with or without script, and its address is emptied.
      *
+     * @dataProvider svgFiles
+     *
      * @param string $svg Downloaded file
      *
      * @return void
@@ -200,6 +202,8 @@ final class ImageImporterTest extends TestCase
 
     /**
      * Server errors and rate limits are tried again, other answers are not.
+     *
+     * @dataProvider answers
      *
      * @param int $status   Status the image server answers
      * @param int $attempts Downloads expected

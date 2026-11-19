@@ -50,6 +50,8 @@ final class EmailUsageTest extends MauticMysqlTestCase
     /**
      * An email published, scheduled or sent may not change.
      *
+     * @dataProvider usedStates
+     *
      * @param string $state How the email was used
      *
      * @return void
@@ -181,7 +183,7 @@ final class EmailUsageTest extends MauticMysqlTestCase
         $event = $this->campaignEvent('email.send', ['email' => $email->getId()]);
         $event->setChannel('email');
         $event->setChannelId((int) $email->getId());
-        $event->setDeleted();
+        $event->setDeleted(new \DateTime());
         $this->em->flush();
 
         self::assertFalse($this->usage->isUsedByActions((int) $email->getId()));

@@ -194,6 +194,8 @@ final class WebhookControllerTest extends MauticMysqlTestCase
     /**
      * A published email is never changed, even one scheduled for later: a new export of its design creates a new email.
      *
+     * @dataProvider publishedStates
+     *
      * @param bool $scheduled Whether the email is published with a send time in the future
      *
      * @return void

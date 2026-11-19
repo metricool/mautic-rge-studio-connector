@@ -70,6 +70,8 @@ final class DesignExportParserTest extends TestCase
     /**
      * Bodies that are not a usable export are rejected with the reason.
      *
+     * @dataProvider unusableBodies
+     *
      * @param string $body    Request body
      * @param string $message Reason expected
      *

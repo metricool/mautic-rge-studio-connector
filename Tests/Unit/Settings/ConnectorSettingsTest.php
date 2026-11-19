@@ -133,6 +133,8 @@ final class ConnectorSettingsTest extends TestCase
     /**
      * The image folder is one safe folder name, or the default.
      *
+     * @dataProvider imageFolders
+     *
      * @param string $configured Folder as configured
      * @param string $expected   Folder used
      *
@@ -179,6 +181,8 @@ final class ConnectorSettingsTest extends TestCase
 
     /**
      * Every limit has a floor, and a value at the floor is kept.
+     *
+     * @dataProvider floors
      *
      * @param string                                   $name  Parameter name without the plugin prefix
      * @param int|float                                $below Value under the floor

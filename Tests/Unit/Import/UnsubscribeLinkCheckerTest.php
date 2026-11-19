@@ -47,6 +47,8 @@ final class UnsubscribeLinkCheckerTest extends TestCase
     /**
      * Each broken form of the link is reported.
      *
+     * @dataProvider brokenLinks
+     *
      * @param string $html     Email HTML
      * @param string $expected Words the problem must contain
      *
@@ -80,6 +82,8 @@ final class UnsubscribeLinkCheckerTest extends TestCase
 
     /**
      * The link is found whatever the case of the attribute name, the quotes or the spaces around the token.
+     *
+     * @dataProvider linkSpellings
      *
      * @param string $link Link as written
      *

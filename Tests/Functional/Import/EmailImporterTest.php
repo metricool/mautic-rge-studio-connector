@@ -375,6 +375,8 @@ final class EmailImporterTest extends MauticMysqlTestCase
     /**
      * A missing or wrong setting stops the import and the connection test with a clear reason.
      *
+     * @dataProvider wrongSettings
+     *
      * @param array<string, mixed> $parameters Settings to change
      * @param string               $message    Reason expected
      *
