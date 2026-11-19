@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLUGIN_DIR: plugins/RgeStudioConnectorBundle
+  DB_HOST: 127.0.0.1
+  DB_USER: root
+  DB_PASSWD: ''
+  DB_NAME: mautictest
+  PHPCS_VERSION: 4.0.4
+  PHPCS_SHA256: 4b010cd21d8bc8a17e2504792e3c77ef8259126f24caf7eafe7eddef1fa871e9
+  INFECTION_VERSION: 0.35.12
+  INFECTION_SHA256: b7e9a28e23daf8178c80bb768bc3fd12047e92ef16ea5724af432314a4c01964
+
+jobs:
+  latest:
+    name: Latest Mautic 7.2
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.find.outputs.version }}
+    steps:
+      - name: Find the latest 7.2 release
+        id: find
+        run: |
+          version="$(git ls-remote --tags --refs https://github.com/mautic/mautic.git 'refs/tags/7.2.*' | sed 's#.*refs/tags/##' | grep -E '^7\.2\.[0-9]+$' | sort -V | tail -n 1)"
+          test -n "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  tests:
+    name: Tests on Mautic ${{ matrix.mautic }}
+    needs: latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mautic: '5.2.4'
+            database: mysql:8.0
+            phpunit: phpunit-mautic5.xml.dist
+          - mautic: '7.2.0'
+            database: mysql:8.4
+            phpunit: phpunit.xml.dist
+          - mautic: ${{ needs.latest.outputs.version }}
+            database: mysql:8.4
+            phpunit: phpunit.xml.dist
+    services:
+      database:
+        image: ${{ matrix.database }}
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: mautictest
+        ports:
+          - 3306
+        options: >-
+          --tmpfs=/var/lib/mysql
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out Mautic
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: mautic/mautic
+          ref: ${{ matrix.mautic }}
+          persist-credentials: false
+
+      - name: Check out the plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: ${{ env.PLUGIN_DIR }}
+          persist-credentials: false
+
+      - name: Set up Mautic
+        uses: ./plugins/RgeStudioConnectorBundle/.github/actions/setup-mautic
+
+      - name: PHPUnit
+        env:
+          DB_PORT: ${{ job.services.database.ports['3306'] }}
+        run: php bin/phpunit -c "${PLUGIN_DIR}/${{ matrix.phpunit }}"
+
+  checks:
+    name: Static checks on Mautic ${{ needs.latest.outputs.version }}
+    needs: latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      database:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: mautictest
+        ports:
+          - 3306
+        options: >-
+          --tmpfs=/var/lib/mysql
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out Mautic
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: mautic/mautic
+          ref: ${{ needs.latest.outputs.version }}
+          persist-credentials: false
+
+      - name: Check out the plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: ${{ env.PLUGIN_DIR }}
+          persist-credentials: false
+
+      - name: Set up Mautic
+        uses: ./plugins/RgeStudioConnectorBundle/.github/actions/setup-mautic
+
+      - name: Code style (PHP-CS-Fixer)
+        run: php bin/php-cs-fixer fix --config "${PLUGIN_DIR}/.php-cs-fixer.php" --dry-run --diff
+
+      - name: Cyclomatic complexity (PHP_CodeSniffer)
+        run: |
+          curl -fsSL -o "${RUNNER_TEMP}/phpcs.phar" "https://github.com/PHPCSStandards/PHP_CodeSniffer/releases/download/${PHPCS_VERSION}/phpcs.phar"
+          echo "${PHPCS_SHA256}  ${RUNNER_TEMP}/phpcs.phar" | sha256sum --check --strict
+          cd "${PLUGIN_DIR}" && php "${RUNNER_TEMP}/phpcs.phar" --standard=phpcs.xml.dist
+
+      - name: PHPStan
+        env:
+          DB_PORT: ${{ job.services.database.ports['3306'] }}
+          APP_DEBUG: '1'
+        run: |
+          php bin/console cache:warmup --env=test
+          php bin/phpstan analyse -c "${PLUGIN_DIR}/phpstan.neon" --no-progress
+
+  mutation:
+    name: Mutation tests on Mautic ${{ needs.latest.outputs.version }}
+    needs: latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      database:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: mautictest
+        ports:
+          - 3306
+        options: >-
+          --tmpfs=/var/lib/mysql
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out Mautic
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: mautic/mautic
+          ref: ${{ needs.latest.outputs.version }}
+          persist-credentials: false
+
+      - name: Check out the plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: ${{ env.PLUGIN_DIR }}
+          persist-credentials: false
+
+      - name: Set up Mautic
+        uses: ./plugins/RgeStudioConnectorBundle/.github/actions/setup-mautic
+        with:
+          coverage: pcov
+
+      - name: Infection
+        env:
+          DB_PORT: ${{ job.services.database.ports['3306'] }}
+        run: |
+          curl -fsSL -o "${RUNNER_TEMP}/infection.phar" "https://github.com/infection/infection/releases/download/${INFECTION_VERSION}/infection.phar"
+          echo "${INFECTION_SHA256}  ${RUNNER_TEMP}/infection.phar" | sha256sum --check --strict
+          cd "${PLUGIN_DIR}" && php "${RUNNER_TEMP}/infection.phar" --threads=1 --no-progress --initial-tests-php-options='-d pcov.enabled=1 -d pcov.directory=.'

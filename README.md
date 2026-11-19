@@ -75,6 +75,8 @@ The code passes PHPStan at its highest level (`phpstan.neon`) and Mautic's PHP-C
 
 The checks and the tests run from a Mautic install with its development dependencies, with the plugin in `plugins/RgeStudioConnectorBundle`. The tests run on Mautic 7.2 with `phpunit.xml.dist` and on Mautic 5.2 with `phpunit-mautic5.xml.dist` (PHPUnit 9). The other checks run on Mautic 7.2. PHP_CodeSniffer and Infection are not part of Mautic's development dependencies.
 
+GitHub Actions (`.github/workflows/ci.yml`) run the tests on Mautic 5.2.4, 7.2.0 and the latest 7.2 release, and the other checks with mutation testing on the latest 7.2 release, for every pull request.
+
 Scenarios tagged `@projects`, `@header-rule` or `@email-version` need Mautic 7.2. Scenarios tagged `@no-projects` or `@no-header-rule` describe Mautic 5.2.
 
 ## Licence
