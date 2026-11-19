@@ -203,8 +203,10 @@ final class ImageDownloadBatch
             return false;
         }
 
-        if ('' !== $content) {
-            fwrite($this->files[$url]['handle'], $content);
+        if ('' !== $content && strlen($content) !== @fwrite($this->files[$url]['handle'], $content)) {
+            $this->stop($url, 'The image could not be written.', false);
+
+            return false;
         }
 
         return true;

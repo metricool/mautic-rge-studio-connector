@@ -177,6 +177,37 @@ final class ImageDownloadBatchTest extends TestCase
     }
 
     /**
+     * A write that fails, as on a full disk, stops the download and keeps no partial file.
+     *
+     * @return void
+     */
+    public function testFailedWriteStopsTheDownload(): void
+    {
+        if (!is_writable('/dev/full')) {
+            self::markTestSkipped('This system has no /dev/full to fill.');
+        }
+
+        $batch    = new ImageDownloadBatch($this->directory, 1024);
+        $response = $this->response('https://cdn.example.org/a.png');
+        $batch->add('https://cdn.example.org/a.png', $response);
+        $batch->receive($response, new FirstChunk(), microtime(true) + 30);
+
+        $files = new \ReflectionProperty(ImageDownloadBatch::class, 'files');
+        $open  = $files->getValue($batch);
+        self::assertIsArray($open);
+        self::assertIsArray($open['https://cdn.example.org/a.png']);
+        $open['https://cdn.example.org/a.png']['handle'] = fopen('/dev/full', 'wb');
+        $files->setValue($batch, $open);
+
+        self::assertFalse($batch->receive($response, new DataChunk(0, 'abc'), microtime(true) + 30));
+
+        self::assertFalse($batch->isRunning());
+        self::assertTrue($response->getInfo('canceled'));
+        self::assertSame(['https://cdn.example.org/a.png' => ['error' => 'The image could not be written.']], $batch->outcomes());
+        self::assertSame([], glob($this->directory.'/.rge*') ?: []);
+    }
+
+    /**
      * A network failure in the middle of a download is recorded as worth another attempt.
      *
      * @return void
