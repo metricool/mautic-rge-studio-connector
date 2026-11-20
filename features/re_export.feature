@@ -1,7 +1,7 @@
 Feature: Exporting the same design again
   In order to fix a design in RGE Studio and export it again
   As a designer
-  I want a new export to update the same email while nothing has used it, and never touch an email in use
+  I want a new export to update the same email while it is unpublished and has never been sent or queued, and never touch it after that
 
   Background:
     Given the shared secret is "current-secret"
