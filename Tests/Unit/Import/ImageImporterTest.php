@@ -127,6 +127,29 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * Images next to an imported stylesheet or a font, and an image address at the very start of the HTML, are
+     * copied, while the stylesheet and the font are left alone.
+     *
+     * @return void
+     */
+    public function testImagesNextToFontsAreCopied(): void
+    {
+        $requests = $this->log();
+        $client   = $this->recording($requests, static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $html     = 'https://media.beefree.cloud/first.png<style>@import \'https://fonts.example.org/a.css\';url(\'https://cdn.example.org/b.png\')'
+            .'@font-face { src: url(https://fonts.example.org/f.woff2) }</style>';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $urls = array_map(static fn (array $request): string => $request['url'], $requests->getArrayCopy());
+        sort($urls);
+        self::assertSame(['https://cdn.example.org/b.png', 'https://media.beefree.cloud/first.png'], $urls);
+        self::assertStringContainsString("@import 'https://fonts.example.org/a.css';", $result->html);
+        self::assertStringContainsString('url(https://fonts.example.org/f.woff2)', $result->html);
+        self::assertSame([], $result->failures);
+    }
+
+    /**
      * A file that is not an image is not kept and its address is emptied.
      *
      * @return void
@@ -363,8 +386,33 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * An address is replaced only where it was found as an image, never inside a link or another address that holds
+     * it, whether it was copied or not.
+     *
+     * @return void
+     */
+    public function testAddressIsReplacedOnlyWhereItWasFound(): void
+    {
+        $client = new MockHttpClient(static fn (string $method, string $url): MockResponse => str_contains($url, 'shop')
+            ? new MockResponse('<html>a shop</html>')
+            : new MockResponse(self::PNG));
+        $html = '<img src="//cdn.example.org/a.png"><a href="https://cdn.example.org/a.png">Large</a>'
+            .'<img src="https://shop.example.com"><a href="https://shop.example.com/offer">Offer</a>';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $copy = 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG).'.png';
+        self::assertSame(
+            '<img src="'.$copy.'"><a href="https://cdn.example.org/a.png">Large</a>'
+            .'<img src=""><a href="https://shop.example.com/offer">Offer</a>',
+            $result->html
+        );
+        self::assertSame([['url' => 'https://shop.example.com', 'reason' => 'The file is not a PNG, JPEG, GIF or WebP image.']], $result->failures);
+    }
+
+    /**
      * Plain images before and after personalised addresses are all replaced, and when the patterns cannot run, as
-     * when PCRE hits its backtracking limit, the HTML is kept as it is.
+     * when PCRE hits its backtracking limit, the HTML is kept as it is and flagged.
      *
      * @return void
      */
@@ -391,6 +439,7 @@ final class ImageImporterTest extends TestCase
         }
 
         self::assertSame('<img src="https://cdn.example.org/a.png">', $failed->html);
+        self::assertSame([['url' => 'HTML', 'reason' => 'It could not be searched for images, so some may not be copied.']], $failed->failures);
     }
 
     /**

@@ -28,8 +28,9 @@ class ImageImporter
     /**
      * Copy every remote image of the HTML into Mautic's media and point the HTML to the copies.
      *
-     * Images not copied by the deadline count as failed, and their address is emptied so the
-     * saved email never points to the designer's storage.
+     * Each address is replaced only where it was found, so a link or a personalised address that holds it stays as
+     * designed. Images not copied by the deadline count as failed, and their address is emptied so the saved email
+     * never points to the designer's storage.
      *
      * @param string $html     Email HTML
      * @param float  $deadline Unix time with microseconds when copying must stop
@@ -38,88 +39,113 @@ class ImageImporter
      */
     public function import(string $html, float $deadline): ImageImportResult
     {
-        $references = $this->references($html);
-        $urls       = array_values(array_unique($references));
-        $outcomes   = $this->copyAll(array_slice($urls, 0, $this->settings->maxImages()), $deadline);
+        [$references, $readable] = $this->references($html);
+        $urls                    = array_values(array_unique(array_column($references, 'url')));
+        $outcomes                = $this->copyAll(array_slice($urls, 0, $this->settings->maxImages()), $deadline);
 
         foreach (array_slice($urls, $this->settings->maxImages()) as $url) {
             $outcomes[$url] = ['error' => 'Too many images in one export.'];
         }
 
-        uksort($references, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-
-        $failures = [];
-        $search   = [];
-        $replace  = [];
-        foreach ($references as $raw => $url) {
-            $outcome   = $outcomes[$url];
-            $search[]  = $raw;
-            $replace[] = $outcome['url'] ?? '';
+        $failures  = [];
+        $rewritten = '';
+        $offset    = 0;
+        foreach ($references as $reference) {
+            $outcome    = $outcomes[$reference['url']];
+            $rewritten .= substr($html, $offset, $reference['start'] - $offset).($outcome['url'] ?? '');
+            $offset     = $reference['start'] + $reference['length'];
             if (!isset($outcome['url'])) {
-                $failures[$url] = ['url' => $url, 'reason' => $outcome['error'] ?? 'Not copied.'];
+                $failures[$reference['url']] = ['url' => $reference['url'], 'reason' => $outcome['error'] ?? 'Not copied.'];
             }
         }
+        $rewritten .= substr($html, $offset);
 
-        $html   = $this->replaceOutsideTokens($html, $search, $replace);
+        if (!$readable) {
+            $failures[] = ['url' => 'HTML', 'reason' => 'It could not be searched for images, so some may not be copied.'];
+        }
+
         $copied = count(array_filter($outcomes, static fn (array $outcome): bool => isset($outcome['url'])));
 
-        return new ImageImportResult($html, $copied, array_merge(array_values($failures), $this->leftovers($html)));
+        return new ImageImportResult($rewritten, $copied, array_merge(array_values($failures), $this->leftovers($rewritten)));
     }
 
     /**
-     * Replace the image references everywhere except inside addresses that hold a Mautic token.
-     *
-     * A personalised address can start with the address of a plain image, and it must stay exactly as designed.
-     *
-     * @param string       $html    Email HTML
-     * @param list<string> $search  Texts to replace, longest first
-     * @param list<string> $replace Replacement for each text
-     *
-     * @return string
-     */
-    private function replaceOutsideTokens(string $html, array $search, array $replace): string
-    {
-        $parts = preg_split('#((?:https?:)?//[^\s"\'<>(),]*(?:\{|%7B)[^\s"\'<>(),]*)#i', $html, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$html];
-        foreach ($parts as $index => $part) {
-            if (0 === $index % 2) {
-                $parts[$index] = str_replace($search, $replace, $part);
-            }
-        }
-
-        return implode('', $parts);
-    }
-
-    /**
-     * Remote image addresses in the HTML, keyed by the exact text found.
+     * Remote image addresses in the HTML, each with where it sits, in the order they appear.
      *
      * Covers src, background and poster attributes (quoted or not), srcset lists, CSS url() values
      * outside @import and @font-face, and any address on the designer's image storage, inside Outlook
      * conditional comments too. Addresses already on this Mautic, and addresses holding a Mautic token
-     * such as a personalised image, are left out.
+     * such as a personalised image, are left out. Where two finds overlap, the first one is kept, and the
+     * longer one when both start at the same place.
      *
      * @param string $html Email HTML
      *
-     * @return array<string, string> Text as found in the HTML, mapped to the address to download
+     * @return array{list<array{start: int, length: int, url: string}>, bool} The addresses, and whether every pattern could run
      */
     private function references(string $html): array
     {
-        $found = array_merge(
-            $this->attributeAddresses($html),
-            $this->srcsetAddresses($html),
-            $this->cssAddresses($html),
-            $this->designerAddresses($html),
-        );
+        $found    = [];
+        $readable = true;
+        foreach ([$this->attributeAddresses($html), $this->srcsetAddresses($html), $this->cssAddresses($html), $this->designerAddresses($html)] as $finds) {
+            if (null === $finds) {
+                $readable = false;
+                continue;
+            }
+            array_push($found, ...$finds);
+        }
 
-        $references = [];
-        foreach ($found as $raw) {
-            $raw = trim($raw);
-            $url = $this->absolute($raw);
-            if ('' !== $raw && null !== $url) {
-                $references[$raw] = $url;
+        $candidates = [];
+        foreach ($found as [$raw, $start]) {
+            $trimmed = trim($raw);
+            $url     = $this->absolute($trimmed);
+            if ('' !== $trimmed && null !== $url) {
+                $candidates[] = ['start' => $start + strlen($raw) - strlen(ltrim($raw)), 'length' => strlen($trimmed), 'url' => $url];
             }
         }
 
-        return $references;
+        usort($candidates, static fn (array $a, array $b): int => [$a['start'], $b['length']] <=> [$b['start'], $a['length']]);
+
+        $references = [];
+        $end        = 0;
+        foreach ($candidates as $candidate) {
+            if ($candidate['start'] >= $end) {
+                $references[] = $candidate;
+                $end          = $candidate['start'] + $candidate['length'];
+            }
+        }
+
+        return [$references, $readable];
+    }
+
+    /**
+     * Texts a pattern captures, each with its byte offset in the HTML.
+     *
+     * For every match the first of the given groups that took part is kept.
+     *
+     * @param string    $pattern Regular expression
+     * @param string    $subject Text to search
+     * @param list<int> $groups  Groups to take, in order of preference
+     * @param int       $base    Offset of the subject inside the HTML
+     *
+     * @return list<array{string, int}>|null Null when the pattern could not run
+     */
+    private function captures(string $pattern, string $subject, array $groups, int $base = 0): ?array
+    {
+        if (false === preg_match_all($pattern, $subject, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            return null;
+        }
+
+        $found = [];
+        foreach ($matches as $match) {
+            foreach ($groups as $group) {
+                if (isset($match[$group]) && -1 !== $match[$group][1]) {
+                    $found[] = [$match[$group][0], $base + $match[$group][1]];
+                    break;
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -127,13 +153,11 @@ class ImageImporter
      *
      * @param string $html Email HTML
      *
-     * @return list<string>
+     * @return list<array{string, int}>|null Null when the pattern could not run
      */
-    private function attributeAddresses(string $html): array
+    private function attributeAddresses(string $html): ?array
     {
-        preg_match_all('/\b(?:src|background|poster)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))/i', $html, $matches, PREG_SET_ORDER);
-
-        return array_map(static fn (array $match): string => ($match[1] ?? '').($match[2] ?? '').($match[3] ?? ''), $matches);
+        return $this->captures('/\b(?:src|background|poster)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))/i', $html, [1, 2, 3]);
     }
 
     /**
@@ -141,16 +165,22 @@ class ImageImporter
      *
      * @param string $html Email HTML
      *
-     * @return list<string>
+     * @return list<array{string, int}>|null Null when a pattern could not run
      */
-    private function srcsetAddresses(string $html): array
+    private function srcsetAddresses(string $html): ?array
     {
-        preg_match_all('/\bsrcset\s*=\s*(["\'])(.*?)\1/is', $html, $matches);
+        $lists = $this->captures('/\bsrcset\s*=\s*(["\'])(.*?)\1/is', $html, [2]);
+        if (null === $lists) {
+            return null;
+        }
 
         $found = [];
-        foreach ($matches[2] as $list) {
-            preg_match_all('/[\s,]*([^\s,](?:\S*[^\s,])?)(?:,+|\s+[^,]*)?/', $list, $candidates);
-            array_push($found, ...$candidates[1]);
+        foreach ($lists as [$list, $offset]) {
+            $candidates = $this->captures('/[\s,]*([^\s,](?:\S*[^\s,])?)(?:,+|\s+[^,]*)?/', $list, [1], $offset);
+            if (null === $candidates) {
+                return null;
+            }
+            array_push($found, ...$candidates);
         }
 
         return $found;
@@ -163,15 +193,29 @@ class ImageImporter
      *
      * @param string $html Email HTML
      *
-     * @return list<string>
+     * @return list<array{string, int}>|null Null when a pattern could not run
      */
-    private function cssAddresses(string $html): array
+    private function cssAddresses(string $html): ?array
     {
-        $css = preg_replace(['/@import[^;]*;/i', '/@font-face\s*\{[^}]*\}/i'], '', $html) ?? '';
-        preg_match_all('/url\(\s*(&quot;|&apos;|&#0*(?:34|39);|&#x0*(?:22|27);|["\'])(.+?)\1\s*\)/i', $css, $quoted);
-        preg_match_all('/url\(\s*([^\s"\'()&][^\s"\'()]*)\s*\)/i', $css, $unquoted);
+        $skipped = $this->captures('/@import[^;]*;|@font-face\s*\{[^}]*\}/i', $html, [0]);
+        $quoted  = $this->captures('/url\(\s*(&quot;|&apos;|&#0*(?:34|39);|&#x0*(?:22|27);|["\'])(.+?)\1\s*\)/i', $html, [2]);
+        $bare    = $this->captures('/url\(\s*([^\s"\'()&][^\s"\'()]*)\s*\)/i', $html, [1]);
+        if (null === $skipped || null === $quoted || null === $bare) {
+            return null;
+        }
 
-        return array_merge($quoted[2], $unquoted[1]);
+        return array_values(array_filter(
+            array_merge($quoted, $bare),
+            static function (array $find) use ($skipped): bool {
+                foreach ($skipped as [$text, $start]) {
+                    if ($find[1] >= $start && $find[1] < $start + strlen($text)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        ));
     }
 
     /**
@@ -182,14 +226,17 @@ class ImageImporter
      *
      * @param string $html Email HTML
      *
-     * @return list<string>
+     * @return list<array{string, int}>|null Null when a pattern could not run
      */
-    private function designerAddresses(string $html): array
+    private function designerAddresses(string $html): ?array
     {
         $found = [];
         foreach ($this->settings->designerHosts() as $host) {
-            preg_match_all('#(?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#](?:[^\s"\'<>()]|\([^\s"\'<>()]*\))*)?#i', $html, $matches);
-            array_push($found, ...$matches[0]);
+            $finds = $this->captures('#(?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#](?:[^\s"\'<>()]|\([^\s"\'<>()]*\))*)?#i', $html, [0]);
+            if (null === $finds) {
+                return null;
+            }
+            array_push($found, ...$finds);
         }
 
         return $found;

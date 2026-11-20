@@ -57,6 +57,15 @@ Feature: Images are copied into Mautic
     And the answer counts 0 problems
     And the email HTML points to the Mautic copy
 
+  Scenario: A link that starts with the address of an image keeps its own address
+    Given a design 1234567 with a working unsubscribe link and the HTML:
+      """
+      <img src="https://shop.example.com"><a href="https://shop.example.com/offer">Offer</a>
+      """
+    When RGE Studio sends the design with the secret "current-secret"
+    Then 1 image was downloaded
+    And the email HTML contains "href="https://shop.example.com/offer""
+
   Scenario: Fonts and imported stylesheets are left as designed
     Given a design 1234567 with a working unsubscribe link and the HTML:
       """
