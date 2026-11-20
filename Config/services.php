@@ -45,8 +45,31 @@ return function (ContainerConfigurator $configurator): void {
 
     $services->alias(ImportProject::class, $projects ? MauticImportProject::class : NoImportProject::class);
 
+    $privateNetworks = [
+        '127.0.0.0/8',
+        '10.0.0.0/8',
+        '192.168.0.0/16',
+        '172.16.0.0/12',
+        '169.254.0.0/16',
+        '0.0.0.0/8',
+        '240.0.0.0/4',
+        '100.64.0.0/10',
+        '198.18.0.0/15',
+        '::1/128',
+        'fc00::/7',
+        'fe80::/10',
+        '::ffff:0:0/96',
+        '::/128',
+        '::/96',
+        '2002::/16',
+        '2001::/32',
+        '64:ff9b::/96',
+        '64:ff9b:1::/48',
+    ];
+
     $services->set('rge_studio_connector.http_client', NoPrivateNetworkHttpClient::class)
-        ->args([service('mautic.native.connector')]);
+        ->autoconfigure(false)
+        ->args([service('mautic.native.connector'), $privateNetworks]);
 
     $services->get(ImageImporter::class)
         ->arg('$httpClient', service('rge_studio_connector.http_client'));

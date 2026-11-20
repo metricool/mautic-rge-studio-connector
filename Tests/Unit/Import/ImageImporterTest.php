@@ -215,6 +215,7 @@ final class ImageImporterTest extends TestCase
         self::assertSame('GET', $request['method']);
         self::assertSame('https://cdn.example.org/a.png', $request['url']);
         self::assertSame(3, $options['max_redirects']);
+        self::assertFalse($options['buffer']);
         self::assertSame(['Accept: image/*'], $headers['accept']);
         self::assertSame('https://cdn.example.org/a.png', $options['user_data']);
         self::assertLessThanOrEqual(10.0, $options['timeout']);
@@ -383,6 +384,29 @@ final class ImageImporterTest extends TestCase
         $copy = 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG).'.png';
         self::assertSame('<img src="'.$copy.'">'.$personalised, $copied->html);
         self::assertSame('<img src="">'.$personalised, $failed->html);
+    }
+
+    /**
+     * Hosts the private network guard cannot check before connecting are never downloaded and stay as designed,
+     * while IP addresses and ordinary names are.
+     *
+     * @return void
+     */
+    public function testHostsTheGuardCannotCheckAreNeverDownloaded(): void
+    {
+        $requests = $this->log();
+        $client   = $this->recording($requests, static fn (): MockResponse => new MockResponse(self::PNG));
+        $skipped  = '<img src="http://localhost/a.png"><img src="http://2130706433/a.png"><img src="http://127.1/a.png">'
+            .'<img src="http://0x7f.1/a.png"><img src="http://intranet/a.png"><img src="http://0/a.png">'
+            .'<img src="http://cdn.example.org.123/a.png"><img src="http://.example.org/a.png">';
+        $html = $skipped.'<img src="http://203.0.113.7/a.png"><img src="http://[2001:db8::7]/a.png"><img src="https://img_1.cdn-2.example.org./a.png">';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $urls = array_map(static fn (array $request): string => $request['url'], $requests->getArrayCopy());
+        self::assertSame(['http://203.0.113.7/a.png', 'http://[2001:db8::7]/a.png', 'https://img_1.cdn-2.example.org./a.png'], $urls);
+        self::assertStringStartsWith($skipped, $result->html);
+        self::assertSame(3, $result->copied);
     }
 
     /**

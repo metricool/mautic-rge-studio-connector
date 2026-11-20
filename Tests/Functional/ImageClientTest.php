@@ -12,7 +12,7 @@ final class ImageClientTest extends MauticMysqlTestCase
 {
     /**
      * The image importer downloads through the client that blocks private network addresses, and that client never
-     * fetches one.
+     * fetches one, carrier-grade and NAT64 ranges included.
      *
      * @return void
      */
@@ -24,8 +24,13 @@ final class ImageClientTest extends MauticMysqlTestCase
         $used = (new \ReflectionProperty(ImageImporter::class, 'httpClient'))->getValue($container->get(ImageImporter::class));
         self::assertSame($client, $used);
 
-        $this->expectException(TransportExceptionInterface::class);
-        $this->expectExceptionMessageMatches('/^(Host|IP) "127\.0\.0\.1" is blocked for "http:\/\/127\.0\.0\.1\/internal\.png"\.$/');
-        $client->request('GET', 'http://127.0.0.1/internal.png')->getStatusCode();
+        foreach (['http://127.0.0.1/internal.png', 'http://100.64.3.7/internal.png', 'http://198.18.0.9/internal.png', 'http://[64:ff9b::a00:1]/internal.png'] as $url) {
+            try {
+                $client->request('GET', $url, ['timeout' => 2, 'max_duration' => 2])->getStatusCode();
+                self::fail('The request to '.$url.' was not blocked.');
+            } catch (TransportExceptionInterface $exception) {
+                self::assertMatchesRegularExpression('/^(Host|IP) "[^"]+" is blocked for "'.preg_quote($url, '/').'"\.$/', $exception->getMessage());
+            }
+        }
     }
 }

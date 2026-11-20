@@ -202,3 +202,20 @@ Feature: Images are copied into Mautic
     When RGE Studio sends the design with the secret "current-secret"
     Then the listener received no request
     And the email name is "[FIX IMAGES] Spring offer"
+
+  Scenario Outline: Images on hosts the private network guard cannot check first are left as designed
+    Given a design 1234567 named "Spring offer" with a working unsubscribe link and the HTML:
+      """
+      <img src="<address>">
+      """
+    And the real HTTP client is used
+    And a listener on 127.0.0.1 counts the requests it receives
+    When RGE Studio sends the design with the secret "current-secret"
+    Then the listener received no request
+    And the email HTML contains "<address>"
+
+    Examples:
+      | address                       |
+      | http://localhost/internal.png  |
+      | http://2130706433/internal.png |
+      | http://127.1/internal.png      |

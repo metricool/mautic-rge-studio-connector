@@ -305,6 +305,11 @@ class ImageImporter
             return null;
         }
 
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!is_string($host) || !$this->isCheckableHost($host)) {
+            return null;
+        }
+
         foreach ($this->settings->mauticBaseUrls() as $base) {
             if (0 === stripos($url, $base.'/')) {
                 return null;
@@ -312,6 +317,24 @@ class ImageImporter
         }
 
         return $url;
+    }
+
+    /**
+     * Whether the guard against private networks can check the host before it connects.
+     *
+     * That is an IP address, or a name of two labels or more whose last label starts with a letter. Hosts such as
+     * localhost, 2130706433 or 127.1 are not, because the resolver may turn them into a private address that the
+     * guard of older Symfony versions only sees after connecting.
+     *
+     * @param string $host Host of the address
+     *
+     * @return bool
+     */
+    private function isCheckableHost(string $host): bool
+    {
+        $host = trim($host, '[]');
+
+        return false !== filter_var($host, FILTER_VALIDATE_IP) || 1 === preg_match('/^(?:[a-z0-9_-]+\.)+[a-z][a-z0-9-]*\.?$/i', $host);
     }
 
     /**
@@ -372,6 +395,7 @@ class ImageImporter
                 'max_duration'  => $remaining,
                 'max_redirects' => 3,
                 'headers'       => ['Accept' => 'image/*'],
+                'buffer'        => false,
                 'user_data'     => $url,
             ]));
         } catch (ExceptionInterface) {
