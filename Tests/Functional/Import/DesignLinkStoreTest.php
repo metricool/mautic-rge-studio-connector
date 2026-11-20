@@ -158,6 +158,21 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     }
 
     /**
+     * An identical export told to wait records its arrival, so a different export that arrived before it is
+     * superseded and the export running for both keeps the design.
+     *
+     * @return void
+     */
+    public function testWaitingIdenticalExportStopsAnOlderOne(): void
+    {
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        self::assertSame(Claim::IN_PROGRESS, $this->store->claim(self::DESIGN, $this->hash('a'), 300, $this->now(), 60)->state);
+
+        self::assertSame(Claim::SUPERSEDED, $this->store->claim(self::DESIGN, $this->hash('b'), 200, $this->now(), 60)->state);
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+    }
+
+    /**
      * Two claims with the same content are told apart: an older one can neither complete nor release the newer one.
      *
      * @return void

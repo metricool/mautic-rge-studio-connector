@@ -536,7 +536,8 @@ final class EmailImporterTest extends MauticMysqlTestCase
     }
 
     /**
-     * An identical export still running makes the import wait, then give up as busy.
+     * An identical export still running makes the import give up as busy at once when its wait is already over,
+     * and wait first otherwise.
      *
      * @return void
      */
@@ -547,6 +548,14 @@ final class EmailImporterTest extends MauticMysqlTestCase
         static::getContainer()->get(DesignLinkStore::class)->claim($export->designId, $export->hash, $earlier, new \DateTimeImmutable('now', new \DateTimeZone('UTC')), 60);
         $importer = $this->importer(['rge_studio_connector_wait_seconds' => 1]);
 
+        $late = microtime(true);
+        try {
+            $importer->import($export, $late - 5);
+            self::fail('The import did not give up.');
+        } catch (ImportBusyException) {
+        }
+        self::assertLessThan(0.5, microtime(true) - $late);
+
         $start = microtime(true);
         try {
             $importer->import($export, $start);
@@ -555,14 +564,6 @@ final class EmailImporterTest extends MauticMysqlTestCase
             self::assertSame('An identical export of this design is still being imported.', $exception->getMessage());
         }
         self::assertGreaterThanOrEqual(0.9, microtime(true) - $start);
-
-        $late = microtime(true);
-        try {
-            $importer->import($export, $late - 5);
-            self::fail('The import did not give up.');
-        } catch (ImportBusyException) {
-        }
-        self::assertLessThan(0.5, microtime(true) - $late);
     }
 
     /**

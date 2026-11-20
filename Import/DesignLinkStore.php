@@ -200,6 +200,11 @@ class DesignLinkStore
         }
 
         if ($hash === $row['pending_hash'] && $this->isFresh($row['claimed_at'], $now, $claimSeconds)) {
+            $this->connection()->executeStatement(
+                'UPDATE '.$this->table().' SET last_arrival = ? WHERE design_id = ?',
+                [$arrival, $designId]
+            );
+
             return new Claim(Claim::IN_PROGRESS, $emailId);
         }
 
