@@ -278,6 +278,27 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     }
 
     /**
+     * A copy of the applied export that arrived before an identical export told to wait does not stop the export
+     * running for both, while a copy newer than every export received does.
+     *
+     * @return void
+     */
+    public function testCopyOfTheAppliedExportOlderThanAWaitingOneLeavesTheRunningOne(): void
+    {
+        $email = $this->email();
+        $this->store->claim(self::DESIGN, $this->hash('x'), 50, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('x'), 50, (int) $email->getId(), $this->now());
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        self::assertSame(Claim::IN_PROGRESS, $this->store->claim(self::DESIGN, $this->hash('a'), 300, $this->now(), 60)->state);
+
+        self::assertSame(Claim::UNCHANGED, $this->store->claim(self::DESIGN, $this->hash('x'), 200, $this->now(), 60)->state);
+        self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+
+        self::assertSame(Claim::UNCHANGED, $this->store->claim(self::DESIGN, $this->hash('x'), 400, $this->now(), 60)->state);
+        self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
+    }
+
+    /**
      * Exports that arrive in the same microsecond are told apart by the order they claim: a different export takes
      * over, and a copy of the applied export does not stop it.
      *

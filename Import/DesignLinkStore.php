@@ -238,10 +238,10 @@ class DesignLinkStore
     }
 
     /**
-     * Answer an export identical to the one applied: nothing changes, and a different export still running that
-     * arrived before this one is stopped.
+     * Answer an export identical to the one applied: nothing changes, and a different export still running is
+     * stopped when this one is the newest the design has received.
      *
-     * @param array<string, mixed> $row      Row with pending_hash, pending_arrival and last_arrival
+     * @param array<string, mixed> $row      Row with pending_hash and last_arrival
      * @param string               $designId Design id
      * @param string               $hash     Hash of this export
      * @param int                  $arrival  When the request arrived, in microseconds since 1970
@@ -251,7 +251,7 @@ class DesignLinkStore
      */
     private function unchanged(array $row, string $designId, string $hash, int $arrival, int $emailId): Claim
     {
-        $stop = null !== $row['pending_hash'] && $hash !== $row['pending_hash'] && $arrival > $this->number($row['pending_arrival']);
+        $stop = null !== $row['pending_hash'] && $hash !== $row['pending_hash'] && $arrival > $this->number($row['last_arrival']);
 
         $this->connection()->executeStatement(
             'UPDATE '.$this->table().' SET last_arrival = ?'.($stop ? ', pending_hash = NULL, pending_arrival = NULL, claimed_at = NULL' : '')

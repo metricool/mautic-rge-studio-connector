@@ -63,6 +63,14 @@ Feature: Exports of one design that arrive at the same time
     And when the export it waited for finishes the waiting export answers with the result "unchanged"
     And the email has the content of the latest export
 
+  Scenario: A late copy of the applied export does not stop an export a newer identical one waits for
+    Given RGE Studio sent the design with the secret "current-secret"
+    And a different export of design 1234567 is being imported
+    And an identical copy of that export is sent with the secret "current-secret" and it waits
+    When a copy of the first export that arrived before the waiting one is sent late with the secret "current-secret"
+    Then the webhook answers 200 with the result "unchanged"
+    And the export being imported still applies its content when it finishes
+
   Scenario: An older export never completes the claim of a newer export with the same content
     Given an export of design 1234567 is being imported
     And a different export of design 1234567 took it over
