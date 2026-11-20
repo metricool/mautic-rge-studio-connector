@@ -24,7 +24,7 @@ A designer exports a design from RGE Studio through its Custom Connector. Mautic
 |---|---|
 | 200 | Every readable export, the connection test (an empty body) and exports that are ignored (not an email, or a status not accepted) |
 | 401 | The shared secret header is missing or wrong, or no secret is configured |
-| 413 | The body is larger than the limit |
+| 413 | The body is larger than the limit, or PHP did not hand it over (over `post_max_size`). A too large declared length is answered before the secret is checked |
 | 422 | The body is not a readable export |
 | 500 | The import failed for an unexpected reason, which is logged |
 | 503 | The plugin is not configured (no import user, or no project name on Mautic 7.2), or an identical export of the same design is still being imported |
@@ -34,6 +34,7 @@ RGE Studio shows a success message only for 200 and does not retry, so the plugi
 ## Requirements
 
 - Mautic 5.2, or Mautic 7.2 or later. PHP 8.2 or later.
+- PHP's `post_max_size` above `rge_studio_connector_max_body_bytes`, or larger exports are answered 413.
 - A Mautic user for the imports. An inactive user with the fewest permissions is enough, since nobody logs in with it.
 - Marketing users need permission to view, edit, publish and delete other users' emails, or they will not see the imports in the email list.
 - Every web server of the Mautic install must share the `media/images` folder.

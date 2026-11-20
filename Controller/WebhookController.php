@@ -39,8 +39,10 @@ final class WebhookController
      * Receive one call from the RGE Studio Custom Connector.
      *
      * The shared secret is already checked by WebhookGuardSubscriber. An empty body is the
-     * connector's connection test. Every readable export answers 200, because RGE Studio shows
-     * nothing but an endless spinner for any other answer, and problems are flagged on the email.
+     * connector's connection test. A body that was declared but never handed over, as PHP does
+     * when it is over post_max_size, is answered as too large. Every readable export answers 200,
+     * because RGE Studio shows nothing but an endless spinner for any other answer, and problems
+     * are flagged on the email.
      *
      * @param Request $request Incoming request
      *
@@ -51,6 +53,13 @@ final class WebhookController
         $arrival   = $request->server->get('REQUEST_TIME_FLOAT');
         $startedAt = is_numeric($arrival) ? (float) $arrival : microtime(true);
         $body      = $request->getContent();
+        $declared  = (int) $request->headers->get('Content-Length', '0');
+
+        if ('' === $body && $declared > 0) {
+            $this->logger->warning('RGE Studio connector: export body not received, it may be over the PHP post_max_size.', ['declared' => $declared]);
+
+            return new JsonResponse(['error' => 'The export is larger than the limit.'], Response::HTTP_REQUEST_ENTITY_TOO_LARGE);
+        }
 
         if (strlen($body) > $this->settings->maxBodyBytes()) {
             return new JsonResponse(['error' => 'The export is larger than the limit.'], Response::HTTP_REQUEST_ENTITY_TOO_LARGE);

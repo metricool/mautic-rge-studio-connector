@@ -56,6 +56,45 @@ final class WebhookControllerTest extends TestCase
     }
 
     /**
+     * A declared body that never arrived, as when PHP drops one over post_max_size, is too large and never a
+     * connection test.
+     *
+     * @return void
+     */
+    public function testDeclaredBodyThatNeverArrivedIsTooLarge(): void
+    {
+        $this->importer->expects(self::never())->method('checkConfiguration');
+        $controller = new WebhookController($this->importer, new DesignExportParser(), SettingsStub::create([]), $this->logger);
+
+        $response = $controller->receiveAction(new Request([], [], [], [], [], ['CONTENT_LENGTH' => '9437184'], ''));
+
+        self::assertSame(413, $response->getStatusCode());
+        self::assertSame('{"error":"The export is larger than the limit."}', $response->getContent());
+        self::assertSame([[
+            'level'   => 'warning',
+            'message' => 'RGE Studio connector: export body not received, it may be over the PHP post_max_size.',
+            'context' => ['declared' => 9437184],
+        ]], $this->logger->records);
+    }
+
+    /**
+     * The connection test answers whatever length is declared, when the body that arrived matches it.
+     *
+     * @return void
+     */
+    public function testConnectionTestWithADeclaredLength(): void
+    {
+        $this->importer->expects(self::exactly(2))->method('checkConfiguration');
+        $controller = new WebhookController($this->importer, new DesignExportParser(), SettingsStub::create([]), $this->logger);
+
+        $empty  = $controller->receiveAction(new Request([], [], [], [], [], ['CONTENT_LENGTH' => '0'], ''));
+        $spaced = $controller->receiveAction(new Request([], [], [], [], [], ['CONTENT_LENGTH' => '1'], ' '));
+
+        self::assertSame('{"ok":true}', $empty->getContent());
+        self::assertSame('{"ok":true}', $spaced->getContent());
+    }
+
+    /**
      * A body over the limit is rejected, one at the limit is read.
      *
      * @return void
