@@ -23,14 +23,14 @@ A designer exports a design from RGE Studio through its Custom Connector. Mautic
 
 | Answer | When |
 |---|---|
-| 200 | Every readable export, the connection test (an empty body) and exports that are ignored (not an email, or a status not accepted) |
+| 200 | Every readable export once the plugin is set up, the connection test (an empty body) and exports that are ignored (not an email, or a status not accepted) |
 | 401 | The shared secret header is missing or wrong, or no secret is configured |
 | 413 | The body is larger than the limit, or PHP did not hand it over (over `post_max_size`). A too large declared length is answered before the secret is checked |
 | 422 | The body is not a readable export |
 | 500 | The import failed for an unexpected reason, which is logged |
 | 503 | The plugin is not configured (no import user, no project name on Mautic 7.2, or its table not created yet), or an identical export of the same design is still being imported |
 
-RGE Studio shows a success message only for 200 and does not retry, so the plugin answers 200 for every readable export and flags problems in Mautic.
+RGE Studio shows a success message only for 200 and does not retry, so the plugin answers 200 for every readable export and flags problems in Mautic. An export answered 413, 500 or 503 is not imported and has to be exported again.
 
 ## Requirements
 
