@@ -7,6 +7,7 @@ namespace MauticPlugin\RgeStudioConnectorBundle\Import;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Connections\PrimaryReadReplicaConnection;
 use Doctrine\DBAL\Exception\RetryableException;
+use Doctrine\DBAL\Exception\TableNotFoundException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\EmailBundle\Entity\Email;
@@ -23,6 +24,22 @@ class DesignLinkStore
      */
     public function __construct(private EntityManagerInterface $entityManager)
     {
+    }
+
+    /**
+     * Check that the plugin's table exists. Mautic creates it when it reloads its plugins.
+     *
+     * @return void
+     *
+     * @throws ConnectorConfigurationException When the table is missing
+     */
+    public function check(): void
+    {
+        try {
+            $this->connection()->fetchOne('SELECT 1 FROM '.$this->table().' LIMIT 1');
+        } catch (TableNotFoundException) {
+            throw new ConnectorConfigurationException('The plugin table '.$this->table().' is missing. Reload the plugins.');
+        }
     }
 
     /**

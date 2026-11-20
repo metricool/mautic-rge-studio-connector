@@ -63,7 +63,8 @@ class EmailImporter
     }
 
     /**
-     * Check that the plugin can import: an import user and, where Mautic has projects, a valid project name.
+     * Check that the plugin can import: an import user, where Mautic has projects a valid project name, and the
+     * plugin's table.
      *
      * @return void
      *
@@ -73,6 +74,7 @@ class EmailImporter
     {
         $this->importUser();
         $this->project->check();
+        $this->store->check();
     }
 
     /**

@@ -29,6 +29,11 @@ Feature: The Custom Connector's connection test
     When RGE Studio tests the connection with the secret "current-secret"
     Then the webhook answers 503 with the error "The connector is not configured."
 
+  Scenario: The connection test fails until Mautic has created the plugin's table
+    Given the plugin's table does not exist yet
+    When RGE Studio tests the connection with the secret "current-secret"
+    Then the webhook answers 503 with the error "The connector is not configured."
+
   Scenario: A body that was declared but never handed over is too large, not a connection test
     When RGE Studio sends a body of 9 MB that PHP does not hand over, with the secret "current-secret"
     Then the webhook answers 413 with the error "The export is larger than the limit."

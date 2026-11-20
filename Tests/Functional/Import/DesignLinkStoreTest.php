@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Functional\Import;
 
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Mapping\ClassMetadata;
 use Mautic\CoreBundle\Test\MauticMysqlTestCase;
 use Mautic\EmailBundle\Entity\Email;
+use MauticPlugin\RgeStudioConnectorBundle\Entity\DesignLink;
 use MauticPlugin\RgeStudioConnectorBundle\Import\Claim;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ConnectorConfigurationException;
 use MauticPlugin\RgeStudioConnectorBundle\Import\DesignLinkStore;
 
 final class DesignLinkStoreTest extends MauticMysqlTestCase
@@ -25,6 +29,26 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
         parent::setUp();
 
         $this->store = static::getContainer()->get(DesignLinkStore::class);
+    }
+
+    /**
+     * The check passes while the table exists, and names the table when it is missing.
+     *
+     * @return void
+     */
+    public function testCheckFindsAMissingTable(): void
+    {
+        $this->store->check();
+
+        $metadata = new ClassMetadata(DesignLink::class);
+        $metadata->setPrimaryTable(['name' => 'rge_studio_designs_missing']);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+        $entityManager->method('getConnection')->willReturn($this->em->getConnection());
+        $entityManager->method('getClassMetadata')->willReturn($metadata);
+
+        $this->expectException(ConnectorConfigurationException::class);
+        $this->expectExceptionMessage('The plugin table rge_studio_designs_missing is missing. Reload the plugins.');
+        (new DesignLinkStore($entityManager))->check();
     }
 
     /**
