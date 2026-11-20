@@ -170,6 +170,19 @@ Feature: Images are copied into Mautic
     Then the email name is "Spring offer"
     And the email HTML points to the Mautic copy
 
+  Scenario: The same export sent again tries the failed images again
+    Given the image server answers "https://media.beefree.cloud/a.png" with status 503
+    And a design 1234567 named "Spring offer" with a working unsubscribe link and the HTML:
+      """
+      <img src="https://media.beefree.cloud/a.png">
+      """
+    And RGE Studio sent the design with the secret "current-secret"
+    When the image server answers "https://media.beefree.cloud/a.png" with a PNG image
+    And RGE Studio sends the design with the secret "current-secret"
+    Then the webhook answers 200 with the result "updated"
+    And the email name is "Spring offer"
+    And the email HTML points to the Mautic copy
+
   Scenario: Images on private network addresses are never downloaded
     Given a design 1234567 named "Spring offer" with a working unsubscribe link and the HTML:
       """

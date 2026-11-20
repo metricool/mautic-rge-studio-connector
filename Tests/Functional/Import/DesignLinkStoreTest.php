@@ -217,6 +217,25 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     }
 
     /**
+     * An export saved with images not copied is not recorded as applied, so the same export sent again claims the
+     * design for its email.
+     *
+     * @return void
+     */
+    public function testExportWithImagesNotCopiedIsNotRecordedAsApplied(): void
+    {
+        $email = $this->email();
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $this->store->complete(self::DESIGN, $this->hash('a'), 100, (int) $email->getId(), $this->now(), false);
+
+        $again = $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60);
+
+        self::assertSame(Claim::CLAIMED, $again->state);
+        self::assertSame($email->getId(), $again->emailId);
+        self::assertSame(Claim::SUPERSEDED, $this->store->claim(self::DESIGN, $this->hash('b'), 150, $this->now(), 60)->state);
+    }
+
+    /**
      * A copy of the applied export that arrived before a newer, different export does not stop that newer export.
      *
      * @return void

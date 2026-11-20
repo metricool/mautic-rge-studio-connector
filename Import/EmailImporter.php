@@ -120,7 +120,7 @@ class EmailImporter
             $result = new ImportResult(ImportResult::SUPERSEDED, $lock['emailId']);
             if ($lock['owned']) {
                 $result = $this->save($export, $images->html, $problems, $wanted, $lock['emailId'], $projectId, $user);
-                $this->store->complete($export->designId, $export->hash, $arrival, (int) $result->emailId, $this->now());
+                $this->store->complete($export->designId, $export->hash, $arrival, (int) $result->emailId, $this->now(), [] === $problems[ConnectorSettings::MARKER_IMAGES]);
             }
             $connection->commit();
 

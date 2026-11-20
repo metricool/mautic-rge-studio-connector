@@ -76,6 +76,30 @@ final class EmailImporterTest extends MauticMysqlTestCase
     }
 
     /**
+     * An export saved with an image not copied is applied again when sent again, so its images are tried again,
+     * while an export with every image copied changes nothing when sent again.
+     *
+     * @return void
+     */
+    public function testExportWithImagesNotCopiedIsAppliedAgainWhenSentAgain(): void
+    {
+        $missing = $this->export(['html' => self::WORKING.'<img src="https://cdn.example.org/missing.png">']);
+        $first   = $this->importer()->import($missing, microtime(true));
+        $again   = $this->importer()->import($missing, microtime(true));
+
+        self::assertSame(ImportResult::CREATED, $first->state);
+        self::assertSame(ImportResult::UPDATED, $again->state);
+        self::assertSame($first->emailId, $again->emailId);
+
+        $copied = $this->export(['html' => self::WORKING.'<img src="https://cdn.example.org/a.png">']);
+        $this->importer()->import($copied, microtime(true));
+        $same = $this->importer()->import($copied, microtime(true));
+
+        self::assertSame(ImportResult::UNCHANGED, $same->state);
+        self::assertSame($first->emailId, $same->emailId);
+    }
+
+    /**
      * Without a status or a preheader the description holds only where the email comes from.
      *
      * @return void

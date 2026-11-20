@@ -86,20 +86,24 @@ class DesignLinkStore
     /**
      * Record that this export is applied to the email, inside the caller's transaction.
      *
-     * @param string             $designId Design id
-     * @param string             $hash     Hash of this export
-     * @param int                $arrival  When the request arrived, the claim's own mark
-     * @param int                $emailId  Email the export was saved to
-     * @param \DateTimeImmutable $now      Current time
+     * An export saved with images that were not copied is not recorded as applied, so the same export sent again
+     * tries them again instead of changing nothing.
+     *
+     * @param string             $designId     Design id
+     * @param string             $hash         Hash of this export
+     * @param int                $arrival      When the request arrived, the claim's own mark
+     * @param int                $emailId      Email the export was saved to
+     * @param \DateTimeImmutable $now          Current time
+     * @param bool               $imagesCopied Whether every image of the export was copied
      *
      * @return void
      */
-    public function complete(string $designId, string $hash, int $arrival, int $emailId, \DateTimeImmutable $now): void
+    public function complete(string $designId, string $hash, int $arrival, int $emailId, \DateTimeImmutable $now, bool $imagesCopied = true): void
     {
         $this->connection()->executeStatement(
             'UPDATE '.$this->table().' SET email_id = ?, payload_hash = ?, pending_hash = NULL, pending_arrival = NULL, claimed_at = NULL, date_modified = ?'
             .' WHERE design_id = ? AND pending_hash = ? AND pending_arrival = ?',
-            [$emailId, $hash, $this->date($now), $designId, $hash, $arrival]
+            [$emailId, $imagesCopied ? $hash : null, $this->date($now), $designId, $hash, $arrival]
         );
     }
 
