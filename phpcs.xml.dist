@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<ruleset name="RGE Studio Connector">
+    <description>Every function stays under cyclomatic complexity 10.</description>
+
+    <file>.</file>
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+
+    <arg name="extensions" value="php"/>
+    <arg value="sp"/>
+
+    <rule ref="Generic.Metrics.CyclomaticComplexity">
+        <properties>
+            <property name="complexity" value="9"/>
+            <property name="absoluteComplexity" value="9"/>
+        </properties>
+    </rule>
+</ruleset>
