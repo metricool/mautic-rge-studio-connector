@@ -58,6 +58,7 @@ return function (ContainerConfigurator $configurator): void {
         '::1/128',
         'fc00::/7',
         'fe80::/10',
+        'fec0::/10',
         '::ffff:0:0/96',
         '::/128',
         '::/96',

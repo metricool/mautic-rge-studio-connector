@@ -24,7 +24,7 @@ final class ImageClientTest extends MauticMysqlTestCase
         $used = (new \ReflectionProperty(ImageImporter::class, 'httpClient'))->getValue($container->get(ImageImporter::class));
         self::assertSame($client, $used);
 
-        foreach (['http://127.0.0.1/internal.png', 'http://100.64.3.7/internal.png', 'http://198.18.0.9/internal.png', 'http://[64:ff9b::a00:1]/internal.png'] as $url) {
+        foreach (['http://127.0.0.1/internal.png', 'http://100.64.3.7/internal.png', 'http://198.18.0.9/internal.png', 'http://[64:ff9b::a00:1]/internal.png', 'http://[fec0::1]/internal.png'] as $url) {
             try {
                 $client->request('GET', $url, ['timeout' => 2, 'max_duration' => 2])->getStatusCode();
                 self::fail('The request to '.$url.' was not blocked.');
