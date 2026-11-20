@@ -25,6 +25,7 @@ final class ImageClientTest extends MauticMysqlTestCase
         self::assertSame($client, $used);
 
         $this->expectException(TransportExceptionInterface::class);
+        $this->expectExceptionMessageMatches('/^(Host|IP) "127\.0\.0\.1" is blocked for "http:\/\/127\.0\.0\.1\/internal\.png"\.$/');
         $client->request('GET', 'http://127.0.0.1/internal.png')->getStatusCode();
     }
 }
