@@ -9,6 +9,7 @@ use Mautic\UserBundle\Security\DummyToken;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ActAsUser;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorage;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 
 final class ActAsUserTest extends TestCase
 {
@@ -34,6 +35,21 @@ final class ActAsUserTest extends TestCase
     }
 
     /**
+     * What the action returns is handed back.
+     *
+     * @return void
+     */
+    public function testActionResultIsReturned(): void
+    {
+        $storage = new TokenStorage();
+        $user    = new User();
+
+        $token = (new ActAsUser($storage))->run($user, static fn (): ?TokenInterface => $storage->getToken());
+
+        self::assertSame($user, $token?->getUser());
+    }
+
+    /**
      * The previous token comes back even when the action fails.
      *
      * @return void
@@ -41,16 +57,15 @@ final class ActAsUserTest extends TestCase
     public function testTokenComesBackWhenTheActionFails(): void
     {
         $storage = new TokenStorage();
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Save failed.');
 
         try {
             (new ActAsUser($storage))->run(new User(), static function (): void {
                 throw new \RuntimeException('Save failed.');
             });
-            self::fail('The failure was swallowed.');
-        } catch (\RuntimeException $exception) {
-            self::assertSame('Save failed.', $exception->getMessage());
+        } finally {
+            self::assertNull($storage->getToken());
         }
-
-        self::assertNull($storage->getToken());
     }
 }

@@ -24,12 +24,14 @@ class ActAsUser
      *
      * The token is restored before the response, so no session or cookie is created for the caller.
      *
-     * @param User     $user   User to act as
-     * @param callable $action Action to run
+     * @template T
      *
-     * @return void
+     * @param User          $user   User to act as
+     * @param callable(): T $action Action to run
+     *
+     * @return T What the action returns
      */
-    public function run(User $user, callable $action): void
+    public function run(User $user, callable $action): mixed
     {
         $previous = $this->tokenStorage->getToken();
         $token    = new DummyToken();
@@ -37,7 +39,7 @@ class ActAsUser
         $this->tokenStorage->setToken($token);
 
         try {
-            $action();
+            return $action();
         } finally {
             $this->tokenStorage->setToken($previous);
         }

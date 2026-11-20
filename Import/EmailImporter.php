@@ -148,7 +148,7 @@ class EmailImporter
      */
     private function save(DesignExport $export, string $html, array $problems, string $wanted, ?int $linkedId, int $projectId, User $user): ImportResult
     {
-        $email = $this->changeableEmail($linkedId);
+        $email = $this->changeableEmail($linkedId, $user, $problems);
         $state = null === $email ? ImportResult::CREATED : ImportResult::UPDATED;
         if (null === $email) {
             $email = $this->newEmail($wanted);
@@ -261,13 +261,17 @@ class EmailImporter
      * Linked email when an export may still change it, otherwise null for a new email.
      *
      * The email's row is locked first, so a publish or a delete at the same moment waits for this import
-     * or is seen by it. Run it inside the import transaction.
+     * or is seen by it. Run it inside the import transaction. An email that Mautic considers locked, as while
+     * someone has it open in the editor, is left alone and flagged, because their next save would put the old
+     * HTML back.
      *
-     * @param int|null $emailId Email linked to the design
+     * @param int|null                    $emailId  Email linked to the design
+     * @param User                        $user     Import user
+     * @param array<string, list<string>> $problems Problems by marker kind, extended in place
      *
      * @return Email|null
      */
-    private function changeableEmail(?int $emailId): ?Email
+    private function changeableEmail(?int $emailId, User $user, array &$problems): ?Email
     {
         if (null === $emailId) {
             return null;
@@ -286,7 +290,17 @@ class EmailImporter
 
         $this->entityManager->refresh($email);
 
-        return $this->usage->isChangeable($email) ? $email : null;
+        if (!$this->usage->isChangeable($email)) {
+            return null;
+        }
+
+        if ($this->actAs->run($user, fn (): bool => $this->emailModel->isLocked($email))) {
+            $problems[ConnectorSettings::MARKER_OTHER][] = 'Email '.$emailId.' was open in Mautic, so this is a new copy.';
+
+            return null;
+        }
+
+        return $email;
     }
 
     /**

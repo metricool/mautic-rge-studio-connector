@@ -100,6 +100,39 @@ final class EmailImporterTest extends MauticMysqlTestCase
     }
 
     /**
+     * An email that Mautic considers locked, because another user has it open in the editor, is left alone: the
+     * export becomes a new flagged copy, and the next export updates that copy.
+     *
+     * @return void
+     */
+    public function testEmailOpenInMauticGetsANewCopy(): void
+    {
+        $first = $this->importer()->import($this->export(), microtime(true));
+        $sales = $this->em->getRepository(User::class)->findOneBy(['username' => 'sales']);
+        self::assertInstanceOf(User::class, $sales);
+        $open = $this->email($first);
+        $open->setCheckedOut(new \DateTime());
+        $open->setCheckedOutBy($sales);
+        $this->em->persist($open);
+        $this->em->flush();
+        $this->em->clear();
+
+        $copy = $this->importer()->import($this->export(['subject' => 'New subject']), microtime(true));
+
+        self::assertSame(ImportResult::CREATED, $copy->state);
+        self::assertNotSame($first->emailId, $copy->emailId);
+        self::assertSame('Our spring offer', $this->email($first)->getSubject());
+        self::assertSame('[FIX EMAIL] Spring offer', $this->email($copy)->getName());
+        self::assertStringContainsString('[FIX EMAIL] Email '.$first->emailId.' was open in Mautic, so this is a new copy.', (string) $this->email($copy)->getDescription());
+
+        $next = $this->importer()->import($this->export(['subject' => 'Third subject']), microtime(true));
+
+        self::assertSame(ImportResult::UPDATED, $next->state);
+        self::assertSame($copy->emailId, $next->emailId);
+        self::assertSame('Spring offer', $this->email($next)->getName());
+    }
+
+    /**
      * Without a status or a preheader the description holds only where the email comes from.
      *
      * @return void

@@ -54,6 +54,23 @@ Feature: Exporting the same design again
     And RGE Studio sends the design with the secret "current-secret"
     Then the email plain text version is empty
 
+  Scenario: An email open in Mautic's editor is left alone and the export becomes a flagged copy
+    Given another Mautic user has the first email open in the editor
+    When the design subject changes to "New subject"
+    And RGE Studio sends the design with the secret "current-secret"
+    Then the webhook answers 200 with the result "created"
+    And the answer holds the id of a second email
+    And the first email still has the subject "Our spring offer"
+    And the email name is "[FIX EMAIL] Spring offer"
+    And the email description contains "was open in Mautic, so this is a new copy."
+
+  Scenario: An email whose Mautic lock has expired is updated again
+    Given Mautic's lock time is 3600 seconds
+    And another Mautic user opened the first email in the editor 2 hours ago
+    When the design subject changes to "New subject"
+    And RGE Studio sends the design with the secret "current-secret"
+    Then the webhook answers 200 with the result "updated"
+
   Scenario Outline: An email in use is never changed and a new email is created
     Given <use>
     When the design subject changes to "New subject"
