@@ -47,6 +47,16 @@ Feature: Images are copied into Mautic
       | <a href="https://media.beefree.cloud/large.png">view</a>                         | media.beefree.cloud |
       | <img src="//cdn.example.org/a.png">                                              | cdn.example.org     |
 
+  Scenario: An address on the designer's storage holding parentheses is copied once, whole
+    Given a design 1234567 with a working unsubscribe link and the HTML:
+      """
+      <div style="background-image:url('https://media.beefree.cloud/pub/hero(1).png')">
+      """
+    When RGE Studio sends the design with the secret "current-secret"
+    Then 1 image was downloaded
+    And the answer counts 0 problems
+    And the email HTML points to the Mautic copy
+
   Scenario: Fonts and imported stylesheets are left as designed
     Given a design 1234567 with a working unsubscribe link and the HTML:
       """

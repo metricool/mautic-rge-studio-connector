@@ -418,6 +418,35 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * A designer storage address holding parentheses is found whole and never also as the part before them, and an
+     * unquoted CSS address still ends at its closing parenthesis.
+     *
+     * @return void
+     */
+    public function testDesignerAddressesMayHoldParentheses(): void
+    {
+        $requests = $this->log();
+        $client   = $this->recording($requests, static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $html     = '<td style="background:url(\'https://media.beefree.cloud/hero(1).png\')">'
+            .'<img src="https://media.beefree.cloud/a(b)c.png">'
+            .'<p>https://media.beefree.cloud/x(2).png</p>'
+            .'<td style="background:url(https://media.beefree.cloud/plain.png)">';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $urls = array_map(static fn (array $request): string => $request['url'], $requests->getArrayCopy());
+        sort($urls);
+        self::assertSame([
+            'https://media.beefree.cloud/a(b)c.png',
+            'https://media.beefree.cloud/hero(1).png',
+            'https://media.beefree.cloud/plain.png',
+            'https://media.beefree.cloud/x(2).png',
+        ], $urls);
+        self::assertSame(4, $result->copied);
+        self::assertSame([], $result->failures);
+    }
+
+    /**
      * Two spellings of one address are downloaded once and both point to the copy.
      *
      * @return void

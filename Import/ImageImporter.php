@@ -177,6 +177,9 @@ class ImageImporter
     /**
      * Every address on the designer's image storage, wherever it appears.
      *
+     * An address may hold balanced parentheses, as in hero(1).png, and ends before an unbalanced one, as in
+     * an unquoted CSS url().
+     *
      * @param string $html Email HTML
      *
      * @return list<string>
@@ -185,7 +188,7 @@ class ImageImporter
     {
         $found = [];
         foreach ($this->settings->designerHosts() as $host) {
-            preg_match_all('#(?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#][^\s"\'<>()]*)?#i', $html, $matches);
+            preg_match_all('#(?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#](?:[^\s"\'<>()]|\([^\s"\'<>()]*\))*)?#i', $html, $matches);
             array_push($found, ...$matches[0]);
         }
 
