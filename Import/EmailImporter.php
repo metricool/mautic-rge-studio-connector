@@ -163,6 +163,7 @@ class EmailImporter
         $this->project->place($email, $projectId);
         $email->setTemplate('mautic_code_mode');
         $email->setCustomHtml($html);
+        $email->setPlainText(null);
         $email->setPreheaderText(null);
         $email->setIsPublished(false);
         $this->checkLinks($html, $problems);

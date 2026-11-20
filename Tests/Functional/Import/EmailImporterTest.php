@@ -169,6 +169,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
         $this->em->persist($segment);
         $email->addExcludedList($segment);
         $email->setPreheaderText('Typed in Mautic');
+        $email->setPlainText('Old price, typed in Mautic');
         $email->setPublishUp(new \DateTime('+1 day'));
         $email->setPublishDown(new \DateTime('+2 days'));
         $email->setDateModified(new \DateTime('2020-01-01 00:00:00'));
@@ -189,6 +190,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
         self::assertSame('list', $updated->getEmailType());
         self::assertSame('New subject', $updated->getSubject());
         self::assertNull($updated->getPreheaderText());
+        self::assertNull($updated->getPlainText());
         self::assertNull($updated->getPublishUp());
         self::assertNull($updated->getPublishDown());
         self::assertCount(0, $updated->getExcludedLists());

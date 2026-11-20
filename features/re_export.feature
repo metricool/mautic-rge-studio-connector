@@ -48,6 +48,12 @@ Feature: Exporting the same design again
     And RGE Studio sends the design with the secret "current-secret"
     Then the email preheader field is empty
 
+  Scenario: An update clears a plain text version kept in Mautic
+    Given someone filled the email's plain text version in Mautic
+    When the design subject changes to "New subject"
+    And RGE Studio sends the design with the secret "current-secret"
+    Then the email plain text version is empty
+
   Scenario Outline: An email in use is never changed and a new email is created
     Given <use>
     When the design subject changes to "New subject"
