@@ -150,6 +150,33 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * A designer storage address in a CSS url() quoted with HTML entities ends before the closing entity, so the
+     * copy keeps the quotes around it.
+     *
+     * @return void
+     */
+    public function testDesignerAddressesStopAtEncodedQuotes(): void
+    {
+        $client = new MockHttpClient(static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $html   = '<td style="background:url(&quot;https://media.beefree.cloud/a.png&quot;)">'
+            .'<td style="background:url(&#39;https://media.beefree.cloud/b.png&#39;)">'
+            .'<td style="background:url(&#x22;https://media.beefree.cloud/c.png&#x22;)">'
+            .'<td style="background:url(&apos;https://media.beefree.cloud/d.png&apos;)">';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $copy = fn (string $name): string => 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG.'https://media.beefree.cloud/'.$name).'.png';
+        self::assertSame([], $result->failures);
+        self::assertSame(
+            '<td style="background:url(&quot;'.$copy('a.png').'&quot;)">'
+            .'<td style="background:url(&#39;'.$copy('b.png').'&#39;)">'
+            .'<td style="background:url(&#x22;'.$copy('c.png').'&#x22;)">'
+            .'<td style="background:url(&apos;'.$copy('d.png').'&apos;)">',
+            $result->html
+        );
+    }
+
+    /**
      * A file that is not an image is not kept and its address is emptied.
      *
      * @return void

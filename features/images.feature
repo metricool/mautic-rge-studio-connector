@@ -44,6 +44,7 @@ Feature: Images are copied into Mautic
       | <img srcset="https://cdn.example.org/w_600,c_scale/a.png 2x">                    | cdn.example.org     |
       | <div style="background-image:url('https://cdn.example.org/a.png')">              | cdn.example.org     |
       | <div style="background-image:url(&#x27;https://cdn.example.org/a.png&#x27;)">    | cdn.example.org     |
+      | <div style="background-image:url(&quot;https://media.beefree.cloud/a.png&quot;)"> | media.beefree.cloud |
       | <a href="https://media.beefree.cloud/large.png">view</a>                         | media.beefree.cloud |
       | <img src="//cdn.example.org/a.png">                                              | cdn.example.org     |
 
