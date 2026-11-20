@@ -174,7 +174,8 @@ class UnsubscribeLinkChecker
      *
      * A token works as the whole href of a link, an a or area element ({unsubscribe_url}), or as text shown in
      * the body ({unsubscribe_text}). It breaks inside a longer address, in the href of any other element, or
-     * ({unsubscribe_text}) inside any attribute. Text in the head, title, style and script elements is never shown.
+     * ({unsubscribe_text}) inside any attribute. The content of title, style and script elements is plain text,
+     * not tags, and no text in the head is shown.
      *
      * @param string $html HTML to scan
      *
@@ -182,14 +183,15 @@ class UnsubscribeLinkChecker
      */
     private function scan(string $html): array
     {
-        $found = ['working' => false, 'broken' => false];
+        $found  = ['working' => false, 'broken' => false];
+        $parsed = preg_replace('/<(title|style|script)(?:\s[^>]*)?>.*?<\/\1\s*>/is', ' ', $html) ?? '';
 
-        preg_match_all('/<([a-zA-Z][^\s\/>"\']*+)(?:[^>"\']|"[^"]*"|\'[^\']*\')*>/s', $html, $tags, PREG_SET_ORDER);
+        preg_match_all('/<([a-zA-Z][^\s\/>"\']*+)(?:[^>"\']|"[^"]*"|\'[^\']*\')*>/s', $parsed, $tags, PREG_SET_ORDER);
         foreach ($tags as $tag) {
             $found = $this->scanTag($tag[0], in_array(strtolower($tag[1]), ['a', 'area'], true), $found);
         }
 
-        $shown = preg_replace('/<(head|title|style|script)(?:\s[^>]*)?>.*?<\/\1\s*>/is', ' ', $html) ?? '';
+        $shown = preg_replace('/<head(?:\s[^>]*)?>.*?<\/head\s*>/is', ' ', $parsed) ?? '';
         $text  = preg_replace('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>|<[\/!][^>]*>/s', ' ', $shown) ?? '';
         if (str_contains($text, self::TEXT_TOKEN)) {
             $found['working'] = true;

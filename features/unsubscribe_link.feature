@@ -57,6 +57,7 @@ Feature: The unsubscribe link is checked
       | <head><link rel="preload" href="{unsubscribe_url}"></head><p>No link here</p>                | An unsubscribe token sits inside a longer address or inside an attribute, so that link breaks.                                 |
       | <head><title>{unsubscribe_text}</title></head><p>No link here</p>                            | There is no working unsubscribe link. Use {unsubscribe_url} as the whole link address, or {unsubscribe_text} as text.         |
       | <style>/* {unsubscribe_text} */</style><p>No link here</p>                                   | There is no working unsubscribe link. Use {unsubscribe_url} as the whole link address, or {unsubscribe_text} as text.         |
+      | <script>var f = '<a href="{unsubscribe_url}">Leave</a>';</script><p>No link here</p>         | There is no working unsubscribe link. Use {unsubscribe_url} as the whole link address, or {unsubscribe_text} as text.         |
 
   Scenario: The unsubscribe address token as the whole address of an image map area works
     Given a design 1234567 named "Spring offer" with the HTML:

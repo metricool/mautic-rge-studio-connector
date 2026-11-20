@@ -84,6 +84,9 @@ final class UnsubscribeLinkCheckerTest extends TestCase
         yield 'text only in the head' => ['<HEAD lang="en"><meta charset="utf-8">{unsubscribe_text}</HEAD ><body><p>Hello</p></body>', 'no working unsubscribe link'];
         yield 'text only in a style block' => ['<body><style type="text/css">/* {unsubscribe_text} */</style><p>Hello</p></body>', 'no working unsubscribe link'];
         yield 'text only in a script' => ['<body><script>var t = "{unsubscribe_text}";</script><p>Hello</p></body>', 'no working unsubscribe link'];
+        yield 'link only in a script' => ['<body><script>var f = \'<a href="{unsubscribe_url}">Leave</a>\';</script><p>Offer</p></body>', 'no working unsubscribe link'];
+        yield 'link only in a style block' => ['<body><style>/* <a href="{unsubscribe_url}">Leave</a> */</style><p>Offer</p></body>', 'no working unsubscribe link'];
+        yield 'link only in the title' => ['<head><TITLE lang="en"><a href="{unsubscribe_url}">Leave</a></TITLE></head><p>Offer</p>', 'no working unsubscribe link'];
     }
 
     /**
@@ -116,6 +119,7 @@ final class UnsubscribeLinkCheckerTest extends TestCase
         yield 'image map area' => ['<map name="m"><area shape="rect" coords="0,0,9,9" href="{unsubscribe_url}" alt="Unsubscribe"></map>'];
         yield 'text in a header element' => ['<header>{unsubscribe_text}</header>'];
         yield 'text after the head' => ['<head><title>Offer</title><style>p { color: red; }</style></head><p>{unsubscribe_text}</p>'];
+        yield 'link after a script' => ['<script>var x = 1;</script><a href="{unsubscribe_url}">x</a>'];
     }
 
     /**
