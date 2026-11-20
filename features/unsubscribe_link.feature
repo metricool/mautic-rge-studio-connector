@@ -54,6 +54,18 @@ Feature: The unsubscribe link is checked
       | <a href="{unsubscribe_url}">Unsubscribe</a><a href="%7Bunsubscribe_url%7D">Again</a>         | An unsubscribe token is URL-encoded (%7B...%7D), and Mautic never replaces it.                                                  |
       | <a href="{unsubscribe_url}">Unsubscribe</a><p>&#123;unsubscribe_text&#125;</p>               | An unsubscribe token is written with HTML entities, and Mautic never replaces it.                                               |
       | <a href="{unsubscribe_url}">Unsubscribe</a><a href="https://mautic.example.com/email/unsubscribe/abc">Old</a> | A pasted unsubscribe address (/email/unsubscribe/) is in the HTML. It only works for one contact.                |
+      | <head><link rel="preload" href="{unsubscribe_url}"></head><p>No link here</p>                | An unsubscribe token sits inside a longer address or inside an attribute, so that link breaks.                                 |
+      | <head><title>{unsubscribe_text}</title></head><p>No link here</p>                            | There is no working unsubscribe link. Use {unsubscribe_url} as the whole link address, or {unsubscribe_text} as text.         |
+      | <style>/* {unsubscribe_text} */</style><p>No link here</p>                                   | There is no working unsubscribe link. Use {unsubscribe_url} as the whole link address, or {unsubscribe_text} as text.         |
+
+  Scenario: The unsubscribe address token as the whole address of an image map area works
+    Given a design 1234567 named "Spring offer" with the HTML:
+      """
+      <map name="footer"><area shape="rect" coords="0,0,99,20" href="{unsubscribe_url}" alt="Unsubscribe"></map>
+      """
+    When RGE Studio sends the design with the secret "current-secret"
+    Then the email name is "Spring offer"
+    And the answer counts 0 problems
 
   @header-rule
   Scenario: Mautic would send no List-Unsubscribe header

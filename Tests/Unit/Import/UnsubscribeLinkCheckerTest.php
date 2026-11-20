@@ -78,6 +78,12 @@ final class UnsubscribeLinkCheckerTest extends TestCase
         yield 'upper case hex entity' => ['<body><a href="{unsubscribe_url}">x</a><p>&#X7B;unsubscribe_text&#X7D;</p></body>', 'HTML entities'];
         yield 'html entities' => ['<body><a href="{unsubscribe_url}">x</a><a href="&#123;unsubscribe_url&#125;">y</a></body>', 'HTML entities'];
         yield 'pasted address' => ['<body><a href="{unsubscribe_url}">x</a><a href="https://m.example.com/email/unsubscribe/abc">y</a></body>', 'pasted unsubscribe address'];
+        yield 'href of an element that is not a link' => ['<head><link rel="preload" href="{unsubscribe_url}"></head><body><p>Hello</p></body>', 'inside a longer address or inside an attribute'];
+        yield 'href of an element that is not a link beside a working one' => ['<body><a href="{unsubscribe_url}">x</a><base href="{unsubscribe_url}"></body>', 'inside a longer address or inside an attribute'];
+        yield 'text only in the title' => ['<html><head><title>{unsubscribe_text}</title></head><body><p>Hello</p></body></html>', 'no working unsubscribe link'];
+        yield 'text only in the head' => ['<HEAD lang="en"><meta charset="utf-8">{unsubscribe_text}</HEAD ><body><p>Hello</p></body>', 'no working unsubscribe link'];
+        yield 'text only in a style block' => ['<body><style type="text/css">/* {unsubscribe_text} */</style><p>Hello</p></body>', 'no working unsubscribe link'];
+        yield 'text only in a script' => ['<body><script>var t = "{unsubscribe_text}";</script><p>Hello</p></body>', 'no working unsubscribe link'];
     }
 
     /**
@@ -106,6 +112,10 @@ final class UnsubscribeLinkCheckerTest extends TestCase
         yield 'single quotes' => ["<a href='{unsubscribe_url}'>x</a>"];
         yield 'no quotes' => ['<a href={unsubscribe_url}>x</a>'];
         yield 'spaces around' => ['<a href=" {unsubscribe_url} ">x</a>'];
+        yield 'upper case tag' => ['<A href="{unsubscribe_url}">x</A>'];
+        yield 'image map area' => ['<map name="m"><area shape="rect" coords="0,0,9,9" href="{unsubscribe_url}" alt="Unsubscribe"></map>'];
+        yield 'text in a header element' => ['<header>{unsubscribe_text}</header>'];
+        yield 'text after the head' => ['<head><title>Offer</title><style>p { color: red; }</style></head><p>{unsubscribe_text}</p>'];
     }
 
     /**

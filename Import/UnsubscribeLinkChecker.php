@@ -172,8 +172,9 @@ class UnsubscribeLinkChecker
     /**
      * Find working and broken unsubscribe tokens.
      *
-     * A token works as the whole href of a link ({unsubscribe_url}) or as text ({unsubscribe_text}).
-     * It breaks inside a longer address, or ({unsubscribe_text}) inside any attribute.
+     * A token works as the whole href of a link, an a or area element ({unsubscribe_url}), or as text shown in
+     * the body ({unsubscribe_text}). It breaks inside a longer address, in the href of any other element, or
+     * ({unsubscribe_text}) inside any attribute. Text in the head, title, style and script elements is never shown.
      *
      * @param string $html HTML to scan
      *
@@ -183,12 +184,13 @@ class UnsubscribeLinkChecker
     {
         $found = ['working' => false, 'broken' => false];
 
-        preg_match_all('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>/s', $html, $tags);
-        foreach ($tags[0] as $tag) {
-            $found = $this->scanTag($tag, $found);
+        preg_match_all('/<([a-zA-Z][^\s\/>"\']*+)(?:[^>"\']|"[^"]*"|\'[^\']*\')*>/s', $html, $tags, PREG_SET_ORDER);
+        foreach ($tags as $tag) {
+            $found = $this->scanTag($tag[0], in_array(strtolower($tag[1]), ['a', 'area'], true), $found);
         }
 
-        $text = preg_replace('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>|<[\/!][^>]*>/s', ' ', $html) ?? '';
+        $shown = preg_replace('/<(head|title|style|script)(?:\s[^>]*)?>.*?<\/\1\s*>/is', ' ', $html) ?? '';
+        $text  = preg_replace('/<[a-zA-Z](?:[^>"\']|"[^"]*"|\'[^\']*\')*>|<[\/!][^>]*>/s', ' ', $shown) ?? '';
         if (str_contains($text, self::TEXT_TOKEN)) {
             $found['working'] = true;
         }
@@ -200,18 +202,19 @@ class UnsubscribeLinkChecker
      * Add the working and broken tokens found in one tag's attributes.
      *
      * @param string                             $tag   Opening tag
+     * @param bool                               $link  Whether the tag opens a link a contact can click (a or area)
      * @param array{working: bool, broken: bool} $found What was found so far
      *
      * @return array{working: bool, broken: bool}
      */
-    private function scanTag(string $tag, array $found): array
+    private function scanTag(string $tag, bool $link, array $found): array
     {
         preg_match_all('/([^\s=\/>]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/s', $tag, $attributes, PREG_SET_ORDER);
         foreach ($attributes as $attribute) {
             $value = $this->attributeValue($attribute);
 
             if (str_contains($value, self::URL_TOKEN)) {
-                if ('href' === strtolower($attribute[1]) && self::URL_TOKEN === trim($value)) {
+                if ($link && 'href' === strtolower($attribute[1]) && self::URL_TOKEN === trim($value)) {
                     $found['working'] = true;
                 } else {
                     $found['broken'] = true;
