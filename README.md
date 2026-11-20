@@ -35,6 +35,7 @@ RGE Studio shows a success message only for 200 and does not retry, so the plugi
 
 - Mautic 5.2, or Mautic 7.2 or later. PHP 8.2 or later.
 - PHP's `post_max_size` above `rge_studio_connector_max_body_bytes`, or larger exports are answered 413.
+- Symfony DomCrawler, CssSelector and HttpClient, which installing the plugin with Composer adds. Mautic 5.2 ships DomCrawler only with its development packages.
 - A Mautic user for the imports. An inactive user with the fewest permissions is enough, since nobody logs in with it.
 - Marketing users need permission to view, edit, publish and delete other users' emails, or they will not see the imports in the email list.
 - Every web server of the Mautic install must share the `media/images` folder.
