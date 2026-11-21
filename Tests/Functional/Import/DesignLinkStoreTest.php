@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Functional\Import;
 
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Exception\LockWaitTimeoutException;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use Mautic\CoreBundle\Test\MauticMysqlTestCase;
@@ -127,6 +130,45 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
         self::assertSame(Claim::CLAIMED, $claim->state);
         self::assertFalse($this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100)['owned']);
         self::assertTrue($this->store->lockForCompletion(self::DESIGN, $this->hash('b'), 200)['owned']);
+    }
+
+    /**
+     * A claim on another connection waits while the design is locked for completion. Once the lock is released,
+     * the newer export takes the design over from the one that held it.
+     *
+     * @return void
+     */
+    public function testClaimWaitsForACompletionOnAnotherConnection(): void
+    {
+        $holding  = $this->separateConnection();
+        $claiming = $this->separateConnection();
+        $claiming->executeStatement('SET SESSION innodb_lock_wait_timeout = 1');
+        $first  = new DesignLinkStore($this->managerOver($holding));
+        $second = new DesignLinkStore($this->managerOver($claiming));
+        $design = '7777777';
+
+        try {
+            $first->claim($design, $this->hash('a'), 100, $this->now(), 60);
+            $holding->beginTransaction();
+            self::assertTrue($first->lockForCompletion($design, $this->hash('a'), 100)['owned']);
+
+            try {
+                $second->claim($design, $this->hash('b'), 200, $this->now(), 60);
+                self::fail('The claim did not wait for the lock.');
+            } catch (LockWaitTimeoutException) {
+            }
+
+            $holding->rollBack();
+            self::assertSame(Claim::CLAIMED, $second->claim($design, $this->hash('b'), 200, $this->now(), 60)->state);
+            self::assertFalse($first->lockForCompletion($design, $this->hash('a'), 100)['owned']);
+        } finally {
+            if ($holding->isTransactionActive()) {
+                $holding->rollBack();
+            }
+            $claiming->delete($this->em->getClassMetadata(DesignLink::class)->getTableName(), ['design_id' => $design]);
+            $holding->close();
+            $claiming->close();
+        }
     }
 
     /**
@@ -389,6 +431,35 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
         $this->em->flush();
 
         return $email;
+    }
+
+    /**
+     * New connection to the test database, outside the transaction each test runs in.
+     *
+     * @return Connection
+     */
+    private function separateConnection(): Connection
+    {
+        return DriverManager::getConnection($this->em->getConnection()->getParams());
+    }
+
+    /**
+     * Entity manager over another connection, with the mappings the store reads.
+     *
+     * @param Connection $connection Connection the store uses
+     *
+     * @return EntityManagerInterface
+     */
+    private function managerOver(Connection $connection): EntityManagerInterface
+    {
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+        $entityManager->method('getConnection')->willReturn($connection);
+        $entityManager->method('getClassMetadata')->willReturnMap([
+            [DesignLink::class, $this->em->getClassMetadata(DesignLink::class)],
+            [Email::class, $this->em->getClassMetadata(Email::class)],
+        ]);
+
+        return $entityManager;
     }
 
     /**
