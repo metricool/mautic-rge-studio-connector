@@ -141,7 +141,7 @@ final class DesignExportParserTest extends TestCase
     }
 
     /**
-     * Tags may also arrive as comma separated text.
+     * Tags may also arrive as comma separated text, and tags that are neither text nor a list are ignored.
      *
      * @return void
      */
@@ -152,6 +152,9 @@ final class DesignExportParserTest extends TestCase
 
         self::assertSame(['a', 'b'], $export->tags);
         self::assertSame('draft', $export->status);
+
+        $numbered = (new DesignExportParser())->parse((string) json_encode(['html' => '<p>Hi</p>', 'edit_url' => 'https://example.com/app/7', 'tags' => 7]));
+        self::assertSame([], $numbered->tags);
     }
 
     /**
