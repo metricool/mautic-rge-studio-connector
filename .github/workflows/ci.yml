@@ -104,11 +104,23 @@ jobs:
         uses: ./plugins/RgeStudioConnectorBundle/.github/actions/setup-mautic
         with:
           php-version: ${{ matrix.php }}
+          coverage: pcov
 
       - name: PHPUnit
         env:
           DB_PORT: ${{ job.services.database.ports['3306'] }}
-        run: php bin/phpunit -c "${PLUGIN_DIR}/${{ matrix.phpunit }}"
+        run: php -d pcov.directory="${PLUGIN_DIR}" bin/phpunit -c "${PLUGIN_DIR}/${{ matrix.phpunit }}" --coverage-clover "${RUNNER_TEMP}/coverage.xml"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ runner.temp }}/coverage.xml
+          disable_search: true
+          flags: mautic-${{ matrix.mautic }}
+          name: Mautic ${{ matrix.mautic }}, PHP ${{ matrix.php }}
+          working-directory: ${{ env.PLUGIN_DIR }}
+          fail_ci_if_error: true
 
   checks:
     name: Static checks on Mautic ${{ needs.latest.outputs.version }}
