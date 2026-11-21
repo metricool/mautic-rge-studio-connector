@@ -9,9 +9,14 @@ use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\SettingsStub;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpClient\Chunk\ErrorChunk;
 use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
+use Symfony\Component\HttpClient\Response\ResponseStream;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
+use Symfony\Contracts\HttpClient\ResponseStreamInterface;
 
 final class ImageImporterTest extends TestCase
 {
@@ -174,6 +179,71 @@ final class ImageImporterTest extends TestCase
             .'<td style="background:url(&apos;'.$copy('d.png').'&apos;)">',
             $result->html
         );
+    }
+
+    /**
+     * A server that never sends anything stops the copies at the deadline, and the image is reported as not copied
+     * in time.
+     *
+     * @return void
+     */
+    public function testStalledDownloadStopsAtTheDeadline(): void
+    {
+        $client = new class() implements HttpClientInterface {
+            /**
+             * Start a download that never receives anything.
+             *
+             * @param string               $method  HTTP method
+             * @param string               $url     Address
+             * @param array<string, mixed> $options Request options
+             *
+             * @return ResponseInterface
+             */
+            public function request(string $method, string $url, array $options = []): ResponseInterface
+            {
+                return (new MockHttpClient(new MockResponse('')))->request($method, $url, $options);
+            }
+
+            /**
+             * Report an idle timeout for every download, again and again.
+             *
+             * @param ResponseInterface|iterable<ResponseInterface> $responses Downloads to watch
+             * @param float|null                                    $timeout   Idle timeout in seconds
+             *
+             * @return ResponseStreamInterface
+             */
+            public function stream($responses, ?float $timeout = null): ResponseStreamInterface
+            {
+                $list = $responses instanceof ResponseInterface ? [$responses] : $responses;
+
+                return new ResponseStream((static function () use ($list): \Generator {
+                    while (true) {
+                        foreach ($list as $response) {
+                            yield $response => new ErrorChunk(0, 'idle');
+                        }
+                    }
+                })());
+            }
+
+            /**
+             * The same client, whatever the options.
+             *
+             * @param array<string, mixed> $options Default options
+             *
+             * @return static
+             */
+            public function withOptions(array $options): static
+            {
+                return $this;
+            }
+        };
+
+        $start  = microtime(true);
+        $result = $this->importer($client)->import('<img src="https://cdn.example.org/slow.png">', $start + 0.6);
+
+        self::assertLessThan(3.0, microtime(true) - $start);
+        self::assertSame([['url' => 'https://cdn.example.org/slow.png', 'reason' => 'Not copied in time.']], $result->failures);
+        self::assertSame('<img src="">', $result->html);
     }
 
     /**
@@ -752,13 +822,13 @@ final class ImageImporterTest extends TestCase
     /**
      * Importer writing under the temporary root.
      *
-     * @param MockHttpClient       $client     HTTP client that answers the downloads
+     * @param HttpClientInterface  $client     HTTP client that answers the downloads
      * @param array<string, mixed> $parameters Settings to change
      * @param string               $relative   Images path as Mautic gives it
      *
      * @return ImageImporter
      */
-    private function importer(MockHttpClient $client, array $parameters = [], string $relative = 'media/images'): ImageImporter
+    private function importer(HttpClientInterface $client, array $parameters = [], string $relative = 'media/images'): ImageImporter
     {
         $paths = new class($this->root, $relative) extends PathsHelper {
             /**

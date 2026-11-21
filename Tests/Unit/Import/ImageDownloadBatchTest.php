@@ -239,8 +239,8 @@ final class ImageDownloadBatchTest extends TestCase
         $batch->add('https://cdn.example.org/over.png', $over);
         $batch->add('https://cdn.example.org/limit.png', $limit);
 
-        $batch->receive($over, new FirstChunk(), microtime(true) + 30);
-        $batch->receive($limit, new FirstChunk(), microtime(true) + 30);
+        self::assertFalse($batch->receive($over, new FirstChunk(), microtime(true) + 30));
+        self::assertFalse($batch->receive($limit, new FirstChunk(), microtime(true) + 30));
 
         self::assertTrue($over->getInfo('canceled'));
         self::assertFalse($limit->getInfo('canceled'));

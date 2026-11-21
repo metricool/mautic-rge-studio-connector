@@ -41,3 +41,6 @@ parameters:
 		-
 			identifier: doctrine.noGetRepositoryOutsideService
 			reportUnmatched: false
+		-
+			identifier: typePerfect.noParamTypeRemoval
+			path: Tests/Unit/Import/ImageImporterTest.php
