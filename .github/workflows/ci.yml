@@ -40,7 +40,7 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
   tests:
-    name: Tests on Mautic ${{ matrix.mautic }}
+    name: Tests on Mautic ${{ matrix.mautic }}, PHP ${{ matrix.php }}
     needs: latest
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -49,12 +49,27 @@ jobs:
       matrix:
         include:
           - mautic: '5.2.4'
+            php: '8.2'
+            database: mysql:8.0
+            phpunit: phpunit-mautic5.xml.dist
+          - mautic: '5.2.4'
+            php: '8.3'
             database: mysql:8.0
             phpunit: phpunit-mautic5.xml.dist
           - mautic: '7.2.0'
+            php: '8.3'
             database: mysql:8.4
             phpunit: phpunit.xml.dist
           - mautic: ${{ needs.latest.outputs.version }}
+            php: '8.2'
+            database: mysql:8.4
+            phpunit: phpunit.xml.dist
+          - mautic: ${{ needs.latest.outputs.version }}
+            php: '8.3'
+            database: mysql:8.4
+            phpunit: phpunit.xml.dist
+          - mautic: ${{ needs.latest.outputs.version }}
+            php: '8.4'
             database: mysql:8.4
             phpunit: phpunit.xml.dist
     services:
@@ -87,11 +102,25 @@ jobs:
 
       - name: Set up Mautic
         uses: ./plugins/RgeStudioConnectorBundle/.github/actions/setup-mautic
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: pcov
 
       - name: PHPUnit
         env:
           DB_PORT: ${{ job.services.database.ports['3306'] }}
-        run: php bin/phpunit -c "${PLUGIN_DIR}/${{ matrix.phpunit }}"
+        run: php -d pcov.directory="${PLUGIN_DIR}" bin/phpunit -c "${PLUGIN_DIR}/${{ matrix.phpunit }}" --coverage-clover "${RUNNER_TEMP}/coverage.xml"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ runner.temp }}/coverage.xml
+          disable_search: true
+          flags: mautic-${{ matrix.mautic }}
+          name: Mautic ${{ matrix.mautic }}, PHP ${{ matrix.php }}
+          working-directory: ${{ env.PLUGIN_DIR }}
+          fail_ci_if_error: true
 
   checks:
     name: Static checks on Mautic ${{ needs.latest.outputs.version }}

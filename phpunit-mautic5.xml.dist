@@ -15,6 +15,17 @@
     failOnWarning="true"
     cacheResultFile="../../var/cache/phpunit-rge-studio-connector/.phpunit.result.cache"
   >
+  <coverage>
+    <include>
+      <directory suffix=".php">.</directory>
+    </include>
+    <exclude>
+      <directory>Config</directory>
+      <directory>Tests</directory>
+      <directory>features</directory>
+      <directory>vendor</directory>
+    </exclude>
+  </coverage>
   <testsuites>
     <testsuite name="RGE Studio Connector">
       <directory>Tests</directory>
