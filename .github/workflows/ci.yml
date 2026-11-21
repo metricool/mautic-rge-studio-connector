@@ -190,4 +190,4 @@ jobs:
         run: |
           curl -fsSL -o "${RUNNER_TEMP}/infection.phar" "https://github.com/infection/infection/releases/download/${INFECTION_VERSION}/infection.phar"
           echo "${INFECTION_SHA256}  ${RUNNER_TEMP}/infection.phar" | sha256sum --check --strict
-          cd "${PLUGIN_DIR}" && php "${RUNNER_TEMP}/infection.phar" --threads=1 --no-progress --initial-tests-php-options='-d pcov.enabled=1 -d pcov.directory=.'
+          cd "${PLUGIN_DIR}" && php "${RUNNER_TEMP}/infection.phar" --threads=1 --no-progress --with-uncovered --initial-tests-php-options='-d pcov.enabled=1 -d pcov.directory=.'
