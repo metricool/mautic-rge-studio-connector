@@ -271,6 +271,30 @@ final class EmailUsageTest extends MauticMysqlTestCase
     }
 
     /**
+     * Action properties that are empty, unreadable or not a list point to no email.
+     *
+     * @return void
+     */
+    public function testUnreadableActionPropertiesAreIgnored(): void
+    {
+        $email = $this->email();
+        $form  = new Form();
+        $form->setName('RGE Studio usage test');
+        $form->setAlias('rgebroken');
+        $this->em->persist($form);
+        $this->formAction($form, 'email.send.lead', ['email' => $email->getId()]);
+        $this->em->flush();
+        self::assertTrue($this->usage->isUsedByActions((int) $email->getId()));
+
+        $table = $this->em->getClassMetadata(Action::class)->getTableName();
+        foreach (['', 'not serialized', serialize('a text')] as $properties) {
+            $this->em->getConnection()->executeStatement('UPDATE '.$table.' SET properties = ? WHERE form_id = ?', [$properties, $form->getId()]);
+
+            self::assertFalse($this->usage->isUsedByActions((int) $email->getId()));
+        }
+    }
+
+    /**
      * Actions that send another email do not count.
      *
      * @return void
