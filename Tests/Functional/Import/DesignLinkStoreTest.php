@@ -332,6 +332,30 @@ final class DesignLinkStoreTest extends MauticMysqlTestCase
     }
 
     /**
+     * A design that has no row is not owned by any export and has no email.
+     *
+     * @return void
+     */
+    public function testDesignWithoutARowIsNotOwned(): void
+    {
+        self::assertSame(['owned' => false, 'emailId' => null], $this->store->lockForCompletion(self::DESIGN, $this->hash('a'), 100));
+    }
+
+    /**
+     * A claim with no claim time holds nothing back, so an identical export takes it over.
+     *
+     * @return void
+     */
+    public function testClaimWithoutAClaimTimeIsStale(): void
+    {
+        $this->store->claim(self::DESIGN, $this->hash('a'), 100, $this->now(), 60);
+        $table = $this->em->getClassMetadata(DesignLink::class)->getTableName();
+        $this->em->getConnection()->executeStatement('UPDATE '.$table.' SET claimed_at = NULL WHERE design_id = ?', [self::DESIGN]);
+
+        self::assertSame(Claim::CLAIMED, $this->store->claim(self::DESIGN, $this->hash('a'), 200, $this->now(), 60)->state);
+    }
+
+    /**
      * An email deleted in Mautic is forgotten, so the next export creates a new one.
      *
      * @return void
