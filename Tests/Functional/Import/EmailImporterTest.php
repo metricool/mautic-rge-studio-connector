@@ -23,6 +23,7 @@ use Mautic\UserBundle\Model\UserModel;
 use Mautic\UserBundle\Security\DummyToken;
 use MauticPlugin\RgeStudioConnectorBundle\Entity\DesignLink;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ActAsUser;
+use MauticPlugin\RgeStudioConnectorBundle\Import\Claim;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ConnectorConfigurationException;
 use MauticPlugin\RgeStudioConnectorBundle\Import\DesignLinkStore;
 use MauticPlugin\RgeStudioConnectorBundle\Import\EmailImporter;
@@ -215,11 +216,12 @@ final class EmailImporterTest extends MauticMysqlTestCase
     }
 
     /**
-     * Image copies end the image time after the request arrived, and never sooner than 10 seconds after they start.
+     * Image copies end the image time after the request arrived. Only after a wait for an identical export do they
+     * still get 10 seconds.
      *
      * @return void
      */
-    public function testImageCopiesKeepTheirTimeAndTenSecondsAtLeast(): void
+    public function testImageCopiesGetTenSecondsOnlyAfterAWait(): void
     {
         $settings = SettingsStub::create(['rge_studio_connector_user_id' => 1]);
         $images   = new class($this->client(), static::getContainer()->get(PathsHelper::class), $settings, static::getContainer()->get(ImageFiles::class)) extends ImageImporter {
@@ -243,9 +245,38 @@ final class EmailImporterTest extends MauticMysqlTestCase
 
         $now = microtime(true);
         $this->importer([], null, null, $images)->import($this->export(), $now);
-        self::assertEqualsWithDelta($now + 25.0, $images->deadline, 0.5);
+        self::assertSame($now + 25.0, $images->deadline);
 
-        $this->importer([], null, null, $images)->import($this->export(['edit_url' => 'https://reallygoodemails.com/app/1/2/3/7654321/edit/message']), microtime(true) - 100.0);
+        $late = microtime(true) - 100.0;
+        $this->importer([], null, null, $images)->import($this->export(['edit_url' => 'https://reallygoodemails.com/app/1/2/3/7654321/edit/message']), $late);
+        self::assertSame($late + 25.0, $images->deadline);
+
+        $store = new class($this->em) extends DesignLinkStore {
+            private bool $busy = true;
+
+            /**
+             * Answer the first claim as in progress, then claim as usual.
+             *
+             * @param string             $designId     Design id
+             * @param string             $hash         Hash of this export
+             * @param int                $arrival      When the request arrived, in microseconds since 1970
+             * @param \DateTimeImmutable $now          Current time
+             * @param int                $claimSeconds Seconds after which an unfinished claim is ignored
+             *
+             * @return Claim
+             */
+            public function claim(string $designId, string $hash, int $arrival, \DateTimeImmutable $now, int $claimSeconds): Claim
+            {
+                if ($this->busy) {
+                    $this->busy = false;
+
+                    return new Claim(Claim::IN_PROGRESS, null);
+                }
+
+                return parent::claim($designId, $hash, $arrival, $now, $claimSeconds);
+            }
+        };
+        $this->importer([], null, $store, $images)->import($this->export(['edit_url' => 'https://reallygoodemails.com/app/1/2/3/7777777/edit/message']), microtime(true) - 20.0);
         self::assertEqualsWithDelta(microtime(true) + 10.0, $images->deadline, 1.0);
     }
 

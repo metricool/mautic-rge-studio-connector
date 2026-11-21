@@ -97,13 +97,16 @@ class EmailImporter
         $projectId = $this->project->prepare($user);
         $arrival   = $this->arrival($startedAt);
 
-        $claim = $this->claim($export, $startedAt, $arrival);
+        [$claim, $waited] = $this->claim($export, $startedAt, $arrival);
         if (!$claim->isClaimed()) {
             return new ImportResult(Claim::SUPERSEDED === $claim->state ? ImportResult::SUPERSEDED : ImportResult::UNCHANGED, $claim->emailId);
         }
 
         $connection = $this->entityManager->getConnection();
-        $deadline   = max($startedAt + $this->settings->imageSeconds(), microtime(true) + 10.0);
+        $deadline   = $startedAt + $this->settings->imageSeconds();
+        if ($waited) {
+            $deadline = max($deadline, microtime(true) + 10.0);
+        }
 
         try {
             $images   = $this->images->import($this->unsubscribe->normalise($export->html), $deadline);
@@ -211,23 +214,25 @@ class EmailImporter
      * @param float        $startedAt Unix time with microseconds when the request arrived
      * @param int          $arrival   The same time in whole microseconds, the claim's own mark
      *
-     * @return Claim
+     * @return array{Claim, bool} The claim, and whether it waited for the identical export
      *
      * @throws ImportBusyException When the identical import is still running at the end of the wait
      */
-    private function claim(DesignExport $export, float $startedAt, int $arrival): Claim
+    private function claim(DesignExport $export, float $startedAt, int $arrival): array
     {
-        $claim = $this->store->claim($export->designId, $export->hash, $arrival, $this->now(), $this->settings->claimSeconds());
+        $claim  = $this->store->claim($export->designId, $export->hash, $arrival, $this->now(), $this->settings->claimSeconds());
+        $waited = false;
         while (Claim::IN_PROGRESS === $claim->state && microtime(true) < $startedAt + $this->settings->waitSeconds()) {
             usleep(500000);
-            $claim = $this->store->claim($export->designId, $export->hash, $arrival, $this->now(), $this->settings->claimSeconds());
+            $waited = true;
+            $claim  = $this->store->claim($export->designId, $export->hash, $arrival, $this->now(), $this->settings->claimSeconds());
         }
 
         if (Claim::IN_PROGRESS === $claim->state) {
             throw new ImportBusyException('An identical export of this design is still being imported.');
         }
 
-        return $claim;
+        return [$claim, $waited];
     }
 
     /**
