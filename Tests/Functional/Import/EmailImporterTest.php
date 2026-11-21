@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Functional\Import;
 
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\Persistence\ManagerRegistry;
 use Mautic\CampaignBundle\Entity\Campaign;
 use Mautic\CampaignBundle\Entity\Event;
@@ -19,12 +21,14 @@ use Mautic\ProjectBundle\Model\ProjectModel;
 use Mautic\UserBundle\Entity\User;
 use Mautic\UserBundle\Model\UserModel;
 use Mautic\UserBundle\Security\DummyToken;
+use MauticPlugin\RgeStudioConnectorBundle\Entity\DesignLink;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ActAsUser;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ConnectorConfigurationException;
 use MauticPlugin\RgeStudioConnectorBundle\Import\DesignLinkStore;
 use MauticPlugin\RgeStudioConnectorBundle\Import\EmailImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Import\EmailUsage;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImportResult;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportBusyException;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportProject;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportResult;
@@ -130,6 +134,150 @@ final class EmailImporterTest extends MauticMysqlTestCase
         self::assertSame(ImportResult::UPDATED, $next->state);
         self::assertSame($copy->emailId, $next->emailId);
         self::assertSame('Spring offer', $this->email($next)->getName());
+    }
+
+    /**
+     * An import that fails while saving rolls its transaction back, frees the design for the next export and passes
+     * the failure on.
+     *
+     * @return void
+     */
+    public function testFailedImportRollsBackAndFreesTheDesign(): void
+    {
+        $failing = new class() implements ImportProject {
+            /**
+             * Check nothing.
+             *
+             * @return void
+             */
+            public function check(): void
+            {
+            }
+
+            /**
+             * No project to prepare.
+             *
+             * @param User $user Import user
+             *
+             * @return int
+             */
+            public function prepare(User $user): int
+            {
+                return 0;
+            }
+
+            /**
+             * Fail while the email is being saved.
+             *
+             * @param Email $email     Email being saved
+             * @param int   $projectId Project id
+             *
+             * @return void
+             */
+            public function place(Email $email, int $projectId): void
+            {
+                throw new \RuntimeException('The project could not be placed.');
+            }
+        };
+        $export     = $this->export();
+        $connection = $this->em->getConnection();
+        $level      = $connection->getTransactionNestingLevel();
+
+        try {
+            $this->importer([], $failing)->import($export, microtime(true));
+            self::fail('The import did not fail.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The project could not be placed.', $exception->getMessage());
+        }
+
+        $table = $this->em->getClassMetadata(DesignLink::class)->getTableName();
+        self::assertSame($level, $connection->getTransactionNestingLevel());
+        self::assertNull($connection->fetchOne('SELECT pending_hash FROM '.$table.' WHERE design_id = ?', [$export->designId]));
+    }
+
+    /**
+     * The connection test names the plugin table when Mautic has not created it yet.
+     *
+     * @return void
+     */
+    public function testConnectionTestFindsAMissingTable(): void
+    {
+        $metadata = new ClassMetadata(DesignLink::class);
+        $metadata->setPrimaryTable(['name' => 'rge_studio_designs_missing']);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+        $entityManager->method('getConnection')->willReturn($this->em->getConnection());
+        $entityManager->method('getClassMetadata')->willReturn($metadata);
+
+        $this->expectException(ConnectorConfigurationException::class);
+        $this->expectExceptionMessage('The plugin table rge_studio_designs_missing is missing. Reload the plugins.');
+        $this->importer([], null, new DesignLinkStore($entityManager))->checkConfiguration();
+    }
+
+    /**
+     * Image copies end the image time after the request arrived, and never sooner than 10 seconds after they start.
+     *
+     * @return void
+     */
+    public function testImageCopiesKeepTheirTimeAndTenSecondsAtLeast(): void
+    {
+        $settings = SettingsStub::create(['rge_studio_connector_user_id' => 1]);
+        $images   = new class($this->client(), static::getContainer()->get(PathsHelper::class), $settings) extends ImageImporter {
+            public float $deadline = 0.0;
+
+            /**
+             * Remember the deadline, then copy as usual.
+             *
+             * @param string $html     Email HTML
+             * @param float  $deadline Unix time with microseconds when copying must stop
+             *
+             * @return ImageImportResult
+             */
+            public function import(string $html, float $deadline): ImageImportResult
+            {
+                $this->deadline = $deadline;
+
+                return parent::import($html, $deadline);
+            }
+        };
+
+        $now = microtime(true);
+        $this->importer([], null, null, $images)->import($this->export(), $now);
+        self::assertEqualsWithDelta($now + 25.0, $images->deadline, 0.5);
+
+        $this->importer([], null, null, $images)->import($this->export(['edit_url' => 'https://reallygoodemails.com/app/1/2/3/7654321/edit/message']), microtime(true) - 100.0);
+        self::assertEqualsWithDelta(microtime(true) + 10.0, $images->deadline, 1.0);
+    }
+
+    /**
+     * The arrival kept for a design is the request time in microseconds, rounded to the nearest one.
+     *
+     * @return void
+     */
+    public function testArrivalIsRoundedToTheMicrosecond(): void
+    {
+        $this->importer()->import($this->export(), 0.0000024);
+        $this->importer()->import($this->export(['edit_url' => 'https://reallygoodemails.com/app/1/2/3/7654321/edit/message']), 0.0000026);
+
+        $table    = $this->em->getClassMetadata(DesignLink::class)->getTableName();
+        $arrivals = $this->em->getConnection()->fetchFirstColumn('SELECT last_arrival FROM '.$table.' WHERE design_id IN (?, ?) ORDER BY design_id', ['1234567', '7654321']);
+
+        self::assertSame(['2', '3'], array_map(static fn (mixed $arrival): string => is_scalar($arrival) ? (string) $arrival : '', $arrivals));
+    }
+
+    /**
+     * An email deleted behind the import's back is not updated, and the export becomes a new email.
+     *
+     * @return void
+     */
+    public function testDeletedEmailGetsANewOne(): void
+    {
+        $first = $this->importer()->import($this->export(), microtime(true));
+        $this->em->getConnection()->executeStatement('DELETE FROM '.$this->em->getClassMetadata(Email::class)->getTableName().' WHERE id = ?', [$first->emailId]);
+
+        $second = $this->importer()->import($this->export(['subject' => 'New subject']), microtime(true));
+
+        self::assertSame(ImportResult::CREATED, $second->state);
+        self::assertNotSame($first->emailId, $second->emailId);
     }
 
     /**
@@ -677,25 +825,24 @@ final class EmailImporterTest extends MauticMysqlTestCase
      *
      * @param array<string, mixed> $parameters Settings to change
      * @param ImportProject|null   $project    Import project handler, by default the one for this Mautic
+     * @param DesignLinkStore|null $store      Design store, by default the container's
+     * @param ImageImporter|null   $images     Image importer, by default one over a mock client
      *
      * @return EmailImporter
      */
-    private function importer(array $parameters = [], ?ImportProject $project = null): EmailImporter
+    private function importer(array $parameters = [], ?ImportProject $project = null, ?DesignLinkStore $store = null, ?ImageImporter $images = null): EmailImporter
     {
         $container = static::getContainer();
         $settings  = SettingsStub::create(array_merge(['rge_studio_connector_user_id' => 1], $parameters));
-        $client    = new MockHttpClient(static fn (string $method, string $url): MockResponse => str_contains($url, 'missing')
-            ? new MockResponse('', ['http_code' => 404])
-            : new MockResponse(self::PNG));
-        $actAs   = new ActAsUser($container->get(TokenStorageInterface::class));
+        $actAs     = new ActAsUser($container->get(TokenStorageInterface::class));
         $project ??= class_exists(ProjectModel::class)
             ? new MauticImportProject($settings, $container->get(ProjectModel::class), $this->em, $container->get(ManagerRegistry::class), $actAs)
             : new NoImportProject();
 
         return new EmailImporter(
             $settings,
-            $container->get(DesignLinkStore::class),
-            new ImageImporter($client, $container->get(PathsHelper::class), $settings),
+            $store ?? $container->get(DesignLinkStore::class),
+            $images ?? new ImageImporter($this->client(), $container->get(PathsHelper::class), $settings),
             new UnsubscribeLinkChecker($settings, UnsubscribeLinkChecker::mauticHasHeaderRule()),
             $container->get(EmailUsage::class),
             $container->get(EmailModel::class),
@@ -705,6 +852,18 @@ final class EmailImporterTest extends MauticMysqlTestCase
             new LinkChecker(),
             $this->em,
         );
+    }
+
+    /**
+     * Mock client that answers 404 for addresses holding "missing" and a PNG image for the others.
+     *
+     * @return MockHttpClient
+     */
+    private function client(): MockHttpClient
+    {
+        return new MockHttpClient(static fn (string $method, string $url): MockResponse => str_contains($url, 'missing')
+            ? new MockResponse('', ['http_code' => 404])
+            : new MockResponse(self::PNG));
     }
 
     /**
