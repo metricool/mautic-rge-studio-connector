@@ -34,7 +34,7 @@ RGE Studio shows a success message only for 200 and does not retry, so the plugi
 
 ## Requirements
 
-- Mautic 5.2, or Mautic 7.2 or later. PHP 8.2 or later.
+- Mautic 5.2, or Mautic 7.2 or later. PHP 8.2, 8.3 or 8.4.
 - PHP's `post_max_size` above `rge_studio_connector_max_body_bytes`, or larger exports are answered 413.
 - Symfony DomCrawler, CssSelector and HttpClient, which installing the plugin with Composer adds. Mautic 5.2 ships DomCrawler only with its development packages.
 - The plugin's table, which Mautic creates when it reloads its plugins after the plugin is added. Until then the connection test answers 503.
@@ -79,7 +79,7 @@ The code passes PHPStan at its highest level (`phpstan.neon`) and Mautic's PHP-C
 
 The checks and the tests run from a Mautic install with its development dependencies, with the plugin in `plugins/RgeStudioConnectorBundle`. The tests run on Mautic 7.2 with `phpunit.xml.dist` and on Mautic 5.2 with `phpunit-mautic5.xml.dist` (PHPUnit 9). The other checks run on Mautic 7.2. PHP_CodeSniffer and Infection are not part of Mautic's development dependencies.
 
-GitHub Actions (`.github/workflows/ci.yml`) run the tests on Mautic 5.2.4, 7.2.0 and the latest 7.2 release, and the other checks with mutation testing on the latest 7.2 release, for every pull request.
+GitHub Actions (`.github/workflows/ci.yml`) run the tests on Mautic 5.2.4 with PHP 8.2 and 8.3, on Mautic 7.2.0 with PHP 8.3 and on the latest 7.2 release with PHP 8.2, 8.3 and 8.4, and the other checks with mutation testing on the latest 7.2 release, for every pull request.
 
 Scenarios tagged `@projects`, `@header-rule` or `@email-version` need Mautic 7.2. Scenarios tagged `@no-projects` or `@no-header-rule` describe Mautic 5.2.
 

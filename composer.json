@@ -6,7 +6,7 @@
     "keywords": ["mautic", "plugin", "integration", "rge-studio", "reallygoodemails", "beefree", "custom-connector", "email"],
     "homepage": "https://github.com/metricool/mautic-rge-studio-connector",
     "require": {
-        "php": "^8.2",
+        "php": ">=8.2 <8.5",
         "ext-json": "*",
         "mautic/core-lib": "^5.2 || ^7.2",
         "symfony/css-selector": "^5.4 || ^7.0",
