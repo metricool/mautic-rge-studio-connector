@@ -212,6 +212,27 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * Only a designer host or one of its subdomains counts, with a port or not, so another host that holds its
+     * name is left as designed and not flagged.
+     *
+     * @return void
+     */
+    public function testDesignerHostsMatchOnlyAsWholeNames(): void
+    {
+        $requests = $this->log();
+        $client   = $this->recording($requests, static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $html     = '<a href="https://imgdist.com.example.org/offer">offer</a><a href="https://notimgdist.com/x">x</a>'
+            .'<a href="https://cdn.imgdist.com:8443/p.png">p</a>';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $copy = 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG.'https://cdn.imgdist.com:8443/p.png').'.png';
+        self::assertSame(['https://cdn.imgdist.com:8443/p.png'], array_map(static fn (array $request): string => $request['url'], $requests->getArrayCopy()));
+        self::assertSame([], $result->failures);
+        self::assertSame('<a href="https://imgdist.com.example.org/offer">offer</a><a href="https://notimgdist.com/x">x</a><a href="'.$copy.'">p</a>', $result->html);
+    }
+
+    /**
      * A server that never sends anything stops the copies at the deadline, and the image is reported as not copied
      * in time.
      *

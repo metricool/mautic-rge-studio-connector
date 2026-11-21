@@ -226,6 +226,7 @@ class ImageImporter
      * An address may hold balanced parentheses, as in hero(1).png, and ends before an unbalanced one, as in
      * an unquoted CSS url(). An address that follows an encoded quote such as &quot; ends before the same
      * encoded quote, which closes a CSS url() inside an attribute. Any other encoded quote is part of it.
+     * The host must be the designer host or one of its subdomains, with a port or not.
      *
      * @param string $html Email HTML
      *
@@ -236,7 +237,7 @@ class ImageImporter
         $char  = '(?!\1)[^\s"\'<>()]';
         $found = [];
         foreach ($this->settings->designerHosts() as $host) {
-            $finds = $this->captures('#(&(?:quot|apos|\#0*3[49]|\#x0*2[27]);)?((?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#](?:'.$char.'|\('.$char.'*\))*)?)#i', $html, [2]);
+            $finds = $this->captures('#(&(?:quot|apos|\#0*3[49]|\#x0*2[27]);)?((?:https?:)?//(?:[a-z0-9-]+\.)*'.$this->wholeHost($host).'(?::\d+)?(?:[/?\#](?:'.$char.'|\('.$char.'*\))*)?)#i', $html, [2]);
             if (null === $finds) {
                 return null;
             }
@@ -273,7 +274,22 @@ class ImageImporter
     }
 
     /**
+     * Pattern for a host name that matches only the whole name, so imgdist.com does not match imgdist.com.example.org.
+     *
+     * @param string $host Host name
+     *
+     * @return string
+     */
+    private function wholeHost(string $host): string
+    {
+        return preg_quote($host, '#').'(?![a-z0-9-]|\.[a-z0-9-])';
+    }
+
+    /**
      * Designer storage addresses still in the HTML after the copies, as failures.
+     *
+     * A host name counts only as a whole name or a subdomain, and the HTML counts as holding it when it cannot be
+     * searched.
      *
      * @param string $html Email HTML with the copies in place
      *
@@ -283,7 +299,7 @@ class ImageImporter
     {
         $failures = [];
         foreach ($this->settings->designerHosts() as $host) {
-            if (false !== stripos($html, $host)) {
+            if (0 !== preg_match('#(?<![a-z0-9-])'.$this->wholeHost($host).'#i', $html)) {
                 $failures[] = ['url' => $host, 'reason' => 'An address on the designer\'s storage is still in the HTML.'];
             }
         }
