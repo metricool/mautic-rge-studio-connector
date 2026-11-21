@@ -1,5 +1,7 @@
 # RGE Studio Connector for Mautic
 
+[![CI](https://github.com/metricool/mautic-rge-studio-connector/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/metricool/mautic-rge-studio-connector/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/metricool/mautic-rge-studio-connector/graph/badge.svg)](https://app.codecov.io/gh/metricool/mautic-rge-studio-connector)
+
 A Mautic plugin that turns RGE Studio (formerly Beefree) Custom Connector exports into Mautic emails.
 
 A designer exports a design from RGE Studio through its Custom Connector. Mautic receives the export at `/rge-studio/webhook` and creates the email by itself, ready for Marketing to pick segments and a send time.
