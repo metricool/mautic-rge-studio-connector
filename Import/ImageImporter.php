@@ -17,11 +17,13 @@ class ImageImporter
      * @param HttpClientInterface $httpClient Client that rejects private network addresses
      * @param PathsHelper         $paths      Mautic paths
      * @param ConnectorSettings   $settings   Plugin settings
+     * @param ImageFiles          $files      File operations of the image folder
      */
     public function __construct(
         private HttpClientInterface $httpClient,
         private PathsHelper $paths,
         private ConnectorSettings $settings,
+        private ImageFiles $files,
     ) {
     }
 
@@ -350,7 +352,7 @@ class ImageImporter
     private function download(array $urls, float $deadline): array
     {
         $directory = $this->directory();
-        $batch     = new ImageDownloadBatch($directory, $this->settings->maxImageBytes());
+        $batch     = new ImageDownloadBatch($directory, $this->settings->maxImageBytes(), $this->files);
         foreach ($urls as $url) {
             $this->start($batch, $url, $deadline);
         }
@@ -417,14 +419,14 @@ class ImageImporter
     {
         $extension = $this->extension($temporary);
         if (null === $extension) {
-            @unlink($temporary);
+            $this->files->remove($temporary);
 
             return ['error' => 'The file is not a PNG, JPEG, GIF or WebP image.'];
         }
 
         $hash = hash_file('sha256', $temporary);
         if (false === $hash) {
-            @unlink($temporary);
+            $this->files->remove($temporary);
 
             return ['error' => 'The downloaded file could not be read.'];
         }
@@ -432,13 +434,13 @@ class ImageImporter
         $name   = $hash.'.'.$extension;
         $target = $directory.'/'.$name;
         if (is_file($target)) {
-            @unlink($temporary);
-        } elseif (!rename($temporary, $target)) {
-            @unlink($temporary);
+            $this->files->remove($temporary);
+        } elseif (!$this->files->move($temporary, $target)) {
+            $this->files->remove($temporary);
 
             return ['error' => 'The image could not be saved in the media folder.'];
         } else {
-            @chmod($target, 0644);
+            $this->files->makeReadable($target);
         }
 
         return ['url' => $this->publicUrl($name)];
@@ -479,9 +481,7 @@ class ImageImporter
     private function directory(): string
     {
         $directory = rtrim((string) $this->paths->getSystemPath('images', true), '/').'/'.$this->settings->imageFolder();
-        if (!is_dir($directory)) {
-            @mkdir($directory, 0775, true);
-        }
+        $this->files->createFolder($directory);
 
         return $directory;
     }

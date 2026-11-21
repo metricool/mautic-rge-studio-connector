@@ -12,6 +12,8 @@ use Mautic\EmailBundle\Entity\Email;
 use Mautic\EmailBundle\Entity\Stat;
 use Mautic\FormBundle\Entity\Action;
 use Mautic\PointBundle\Entity\TriggerEvent;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\ErrorHandler\ErrorHandler;
 
 class EmailUsage
 {
@@ -19,9 +21,12 @@ class EmailUsage
      * Build the usage checks.
      *
      * @param EntityManagerInterface $entityManager Entity manager for table names and the connection
+     * @param LoggerInterface        $logger        Mautic logger
      */
-    public function __construct(private EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private EntityManagerInterface $entityManager,
+        private LoggerInterface $logger,
+    ) {
     }
 
     /**
@@ -113,12 +118,8 @@ class EmailUsage
      */
     private function propertiesPointTo(mixed $properties, int $emailId): bool
     {
-        if (!is_string($properties) || '' === $properties) {
-            return false;
-        }
-
-        $data = @unserialize($properties, ['allowed_classes' => false]);
-        if (!is_array($data)) {
+        $data = $this->readProperties($properties);
+        if (null === $data) {
             return false;
         }
 
@@ -131,6 +132,32 @@ class EmailUsage
         }
 
         return false;
+    }
+
+    /**
+     * Action properties as a list, or null when they are empty, unreadable or not a list.
+     *
+     * The PHP error of unreadable properties is logged.
+     *
+     * @param mixed $properties Serialized properties column
+     *
+     * @return array<mixed>|null
+     */
+    private function readProperties(mixed $properties): ?array
+    {
+        if (!is_string($properties) || '' === $properties) {
+            return null;
+        }
+
+        try {
+            $data = ErrorHandler::call(static fn (): mixed => unserialize($properties, ['allowed_classes' => false]));
+        } catch (\ErrorException $exception) {
+            $this->logger->warning('RGE Studio connector: the properties of a form action could not be read.', ['error' => $exception->getMessage()]);
+
+            return null;
+        }
+
+        return is_array($data) ? $data : null;
     }
 
     /**

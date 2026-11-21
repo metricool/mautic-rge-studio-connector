@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\Import;
 
 use Mautic\CoreBundle\Helper\PathsHelper;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ImageFiles;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\SettingsStub;
+use MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\SpyLogger;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\Chunk\ErrorChunk;
@@ -24,8 +26,10 @@ final class ImageImporterTest extends TestCase
 
     private string $root;
 
+    private SpyLogger $logger;
+
     /**
-     * Create an empty folder that stands in for Mautic's root.
+     * Create an empty folder that stands in for Mautic's root, and a logger to read.
      *
      * @return void
      */
@@ -33,6 +37,7 @@ final class ImageImporterTest extends TestCase
     {
         $this->root = sys_get_temp_dir().'/rge-studio-test-'.bin2hex(random_bytes(6));
         mkdir($this->root.'/media/images', 0777, true);
+        $this->logger = new SpyLogger();
     }
 
     /**
@@ -247,6 +252,29 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * A copy that cannot take its place in the media folder is reported, its address is emptied and the PHP error
+     * is logged.
+     *
+     * @return void
+     */
+    public function testCopyThatCannotBeSavedIsReported(): void
+    {
+        $target = $this->root.'/media/images/rge-studio/'.hash('sha256', self::PNG).'.png';
+        mkdir($target, 0777, true);
+
+        $result = $this->importer(new MockHttpClient(new MockResponse(self::PNG)))
+            ->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertSame(0, $result->copied);
+        self::assertSame([['url' => 'https://cdn.example.org/a.png', 'reason' => 'The image could not be saved in the media folder.']], $result->failures);
+        self::assertSame('<img src="">', $result->html);
+        self::assertSame([], glob($this->root.'/media/images/rge-studio/.rge*') ?: []);
+        self::assertCount(1, $this->logger->records);
+        self::assertSame('RGE Studio connector: an image could not be saved in the media folder.', $this->logger->records[0]['message']);
+        self::assertSame($target, $this->logger->records[0]['context']['to']);
+    }
+
+    /**
      * A file that is not an image is not kept and its address is emptied.
      *
      * @return void
@@ -259,6 +287,28 @@ final class ImageImporterTest extends TestCase
 
         self::assertSame('<img src="">', $result->html);
         self::assertTrue($result->hasFailures());
+        self::assertSame([], glob($this->root.'/media/images/rge-studio/.rge*') ?: []);
+    }
+
+    /**
+     * An image already in the media folder is used as it is, and the new download of it is removed.
+     *
+     * @return void
+     */
+    public function testImageAlreadySavedIsReused(): void
+    {
+        $name = hash('sha256', self::PNG).'.png';
+        mkdir($this->root.'/media/images/rge-studio');
+        file_put_contents($this->root.'/media/images/rge-studio/'.$name, self::PNG);
+
+        $result = $this->importer(new MockHttpClient(new MockResponse(self::PNG)))
+            ->import('<img src="https://cdn.example.org/a.png">', microtime(true) + 30);
+
+        self::assertSame(1, $result->copied);
+        self::assertSame([], $result->failures);
+        self::assertSame('<img src="https://mautic.example.com/media/images/rge-studio/'.$name.'">', $result->html);
+        self::assertSame([], glob($this->root.'/media/images/rge-studio/.rge*') ?: []);
+        self::assertSame([], $this->logger->records);
     }
 
     /**
@@ -855,6 +905,6 @@ final class ImageImporterTest extends TestCase
             }
         };
 
-        return new ImageImporter($client, $paths, SettingsStub::create($parameters));
+        return new ImageImporter($client, $paths, SettingsStub::create($parameters), new ImageFiles($this->logger));
     }
 }

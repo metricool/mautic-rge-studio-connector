@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\Import;
 
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageDownloadBatch;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ImageFiles;
+use MauticPlugin\RgeStudioConnectorBundle\Tests\Unit\SpyLogger;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\Chunk\DataChunk;
 use Symfony\Component\HttpClient\Chunk\ErrorChunk;
@@ -18,8 +20,10 @@ final class ImageDownloadBatchTest extends TestCase
 {
     private string $directory;
 
+    private SpyLogger $logger;
+
     /**
-     * Create an empty folder for the temporary files.
+     * Create an empty folder for the temporary files, and a logger to read.
      *
      * @return void
      */
@@ -27,6 +31,7 @@ final class ImageDownloadBatchTest extends TestCase
     {
         $this->directory = sys_get_temp_dir().'/rge-studio-batch-'.bin2hex(random_bytes(6));
         mkdir($this->directory);
+        $this->logger = new SpyLogger();
     }
 
     /**
@@ -49,7 +54,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testFailuresRecordTheRetryFlagOnlyWhenAsked(): void
     {
-        $batch = new ImageDownloadBatch($this->directory, 1024);
+        $batch = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $batch->fail('https://cdn.example.org/a.png', 'Try later.', true);
         $batch->fail('https://cdn.example.org/b.png', 'Give up.', false);
 
@@ -67,7 +72,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testRunningDownloadsAreAList(): void
     {
-        $batch = new ImageDownloadBatch($this->directory, 1024);
+        $batch = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $first = $this->response('https://cdn.example.org/a.png');
         $other = $this->response('https://cdn.example.org/b.png');
         $batch->add('https://cdn.example.org/a.png', $first);
@@ -84,7 +89,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testTimeoutsStopTheStreamOnlyAfterTheDeadline(): void
     {
-        $batch    = new ImageDownloadBatch($this->directory, 1024);
+        $batch    = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $response = $this->response('https://cdn.example.org/a.png');
         $batch->add('https://cdn.example.org/a.png', $response);
 
@@ -101,7 +106,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testChunksOfUnknownDownloadsAreIgnored(): void
     {
-        $batch = new ImageDownloadBatch($this->directory, 1024);
+        $batch = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
 
         self::assertFalse($batch->receive($this->response('https://cdn.example.org/a.png'), new FirstChunk(), microtime(true) + 30));
         self::assertSame([], $batch->outcomes());
@@ -115,7 +120,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testRemainingDownloadsAreCancelled(): void
     {
-        $batch    = new ImageDownloadBatch($this->directory, 1024);
+        $batch    = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $response = $this->response('https://cdn.example.org/a.png');
         $other    = $this->response('https://cdn.example.org/b.png');
         $batch->add('https://cdn.example.org/a.png', $response);
@@ -139,7 +144,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testCompleteDownloadKeepsItsFile(): void
     {
-        $batch    = new ImageDownloadBatch($this->directory, 1024);
+        $batch    = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $response = $this->response('https://cdn.example.org/a.png');
         $batch->add('https://cdn.example.org/a.png', $response);
 
@@ -161,7 +166,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testBytesOverTheLimitStopTheDownload(): void
     {
-        $batch    = new ImageDownloadBatch($this->directory, 4);
+        $batch    = new ImageDownloadBatch($this->directory, 4, new ImageFiles($this->logger));
         $response = $this->response('https://cdn.example.org/a.png');
         $batch->add('https://cdn.example.org/a.png', $response);
 
@@ -187,7 +192,7 @@ final class ImageDownloadBatchTest extends TestCase
             self::markTestSkipped('This system has no /dev/full to fill.');
         }
 
-        $batch    = new ImageDownloadBatch($this->directory, 1024);
+        $batch    = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $response = $this->response('https://cdn.example.org/a.png');
         $batch->add('https://cdn.example.org/a.png', $response);
         $batch->receive($response, new FirstChunk(), microtime(true) + 30);
@@ -205,6 +210,9 @@ final class ImageDownloadBatchTest extends TestCase
         self::assertTrue($response->getInfo('canceled'));
         self::assertSame(['https://cdn.example.org/a.png' => ['error' => 'The image could not be written.']], $batch->outcomes());
         self::assertSame([], glob($this->directory.'/.rge*') ?: []);
+        self::assertCount(1, $this->logger->records);
+        self::assertSame('RGE Studio connector: a downloaded image could not be written.', $this->logger->records[0]['message']);
+        self::assertSame(['bytes' => 3, 'error' => 'fwrite(): Write of 3 bytes failed with errno=28 No space left on device'], $this->logger->records[0]['context']);
     }
 
     /**
@@ -214,7 +222,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testNetworkFailuresAreWorthAnotherAttempt(): void
     {
-        $batch    = new ImageDownloadBatch($this->directory, 1024);
+        $batch    = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $response = $this->response('https://cdn.example.org/a.png');
         $batch->add('https://cdn.example.org/a.png', $response);
 
@@ -233,7 +241,7 @@ final class ImageDownloadBatchTest extends TestCase
      */
     public function testDeclaredLengthIsCheckedFirst(): void
     {
-        $batch = new ImageDownloadBatch($this->directory, 1024);
+        $batch = new ImageDownloadBatch($this->directory, 1024, new ImageFiles($this->logger));
         $over  = $this->declared('https://cdn.example.org/over.png', '1025');
         $limit = $this->declared('https://cdn.example.org/limit.png', '1024');
         $batch->add('https://cdn.example.org/over.png', $over);

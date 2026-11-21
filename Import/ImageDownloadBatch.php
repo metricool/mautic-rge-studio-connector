@@ -33,12 +33,14 @@ final class ImageDownloadBatch
     /**
      * Build an empty batch.
      *
-     * @param string $directory Folder that receives the temporary files
-     * @param int    $maxBytes  Largest image accepted, in bytes
+     * @param string     $directory  Folder that receives the temporary files
+     * @param int        $maxBytes   Largest image accepted, in bytes
+     * @param ImageFiles $imageFiles File operations of the image folder
      */
     public function __construct(
         private string $directory,
         private int $maxBytes,
+        private ImageFiles $imageFiles,
     ) {
     }
 
@@ -203,7 +205,7 @@ final class ImageDownloadBatch
             return false;
         }
 
-        if ('' !== $content && strlen($content) !== @fwrite($this->files[$url]['handle'], $content)) {
+        if ('' !== $content && !$this->imageFiles->write($this->files[$url]['handle'], $content)) {
             $this->stop($url, 'The image could not be written.', false);
 
             return false;
@@ -246,7 +248,7 @@ final class ImageDownloadBatch
             if (is_resource($this->files[$url]['handle'])) {
                 fclose($this->files[$url]['handle']);
             }
-            @unlink($this->files[$url]['path']);
+            $this->imageFiles->remove($this->files[$url]['path']);
             unset($this->files[$url]);
         }
 

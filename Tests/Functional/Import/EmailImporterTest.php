@@ -27,6 +27,7 @@ use MauticPlugin\RgeStudioConnectorBundle\Import\ConnectorConfigurationException
 use MauticPlugin\RgeStudioConnectorBundle\Import\DesignLinkStore;
 use MauticPlugin\RgeStudioConnectorBundle\Import\EmailImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Import\EmailUsage;
+use MauticPlugin\RgeStudioConnectorBundle\Import\ImageFiles;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImporter;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImageImportResult;
 use MauticPlugin\RgeStudioConnectorBundle\Import\ImportBusyException;
@@ -221,7 +222,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
     public function testImageCopiesKeepTheirTimeAndTenSecondsAtLeast(): void
     {
         $settings = SettingsStub::create(['rge_studio_connector_user_id' => 1]);
-        $images   = new class($this->client(), static::getContainer()->get(PathsHelper::class), $settings) extends ImageImporter {
+        $images   = new class($this->client(), static::getContainer()->get(PathsHelper::class), $settings, static::getContainer()->get(ImageFiles::class)) extends ImageImporter {
             public float $deadline = 0.0;
 
             /**
@@ -842,7 +843,7 @@ final class EmailImporterTest extends MauticMysqlTestCase
         return new EmailImporter(
             $settings,
             $store ?? $container->get(DesignLinkStore::class),
-            $images ?? new ImageImporter($this->client(), $container->get(PathsHelper::class), $settings),
+            $images ?? new ImageImporter($this->client(), $container->get(PathsHelper::class), $settings, $container->get(ImageFiles::class)),
             new UnsubscribeLinkChecker($settings, UnsubscribeLinkChecker::mauticHasHeaderRule()),
             $container->get(EmailUsage::class),
             $container->get(EmailModel::class),
