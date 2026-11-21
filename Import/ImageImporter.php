@@ -224,8 +224,8 @@ class ImageImporter
      * Every address on the designer's image storage, wherever it appears.
      *
      * An address may hold balanced parentheses, as in hero(1).png, and ends before an unbalanced one, as in
-     * an unquoted CSS url(), and before an encoded quote such as &quot;, which closes a CSS url() inside an
-     * attribute.
+     * an unquoted CSS url(). An address that follows an encoded quote such as &quot; ends before the same
+     * encoded quote, which closes a CSS url() inside an attribute. Any other encoded quote is part of it.
      *
      * @param string $html Email HTML
      *
@@ -233,10 +233,10 @@ class ImageImporter
      */
     private function designerAddresses(string $html): ?array
     {
-        $char  = '(?!&(?:quot|apos|\#0*3[49]|\#x0*2[27]);)[^\s"\'<>()]';
+        $char  = '(?!\1)[^\s"\'<>()]';
         $found = [];
         foreach ($this->settings->designerHosts() as $host) {
-            $finds = $this->captures('#(?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#](?:'.$char.'|\('.$char.'*\))*)?#i', $html, [0]);
+            $finds = $this->captures('#(&(?:quot|apos|\#0*3[49]|\#x0*2[27]);)?((?:https?:)?//(?:[a-z0-9-]+\.)*'.preg_quote($host, '#').'(?:[/?\#](?:'.$char.'|\('.$char.'*\))*)?)#i', $html, [2]);
             if (null === $finds) {
                 return null;
             }

@@ -187,6 +187,31 @@ final class ImageImporterTest extends TestCase
     }
 
     /**
+     * An encoded quote that did not open the address is part of it, in a link and in a CSS url() alike.
+     *
+     * @return void
+     */
+    public function testDesignerAddressesKeepOtherEncodedQuotes(): void
+    {
+        $requests = $this->log();
+        $client   = $this->recording($requests, static fn (string $method, string $url): MockResponse => new MockResponse(self::PNG.$url));
+        $html     = '<a href="https://media.beefree.cloud/Bob&apos;s.png">view</a>'
+            .'<td style="background:url(&quot;https://media.beefree.cloud/Ann&#39;s.png&quot;)">';
+
+        $result = $this->importer($client)->import($html, microtime(true) + 30);
+
+        $urls = array_map(static fn (array $request): string => $request['url'], $requests->getArrayCopy());
+        sort($urls);
+        $copy = fn (string $name): string => 'https://mautic.example.com/media/images/rge-studio/'.hash('sha256', self::PNG.'https://media.beefree.cloud/'.$name).'.png';
+        self::assertSame(['https://media.beefree.cloud/Ann\'s.png', 'https://media.beefree.cloud/Bob\'s.png'], $urls);
+        self::assertSame([], $result->failures);
+        self::assertSame(
+            '<a href="'.$copy('Bob\'s.png').'">view</a><td style="background:url(&quot;'.$copy('Ann\'s.png').'&quot;)">',
+            $result->html
+        );
+    }
+
+    /**
      * A server that never sends anything stops the copies at the deadline, and the image is reported as not copied
      * in time.
      *
